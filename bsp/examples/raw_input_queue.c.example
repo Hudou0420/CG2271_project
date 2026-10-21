@@ -1,0 +1,63 @@
+/* OPTIONAL application integration example, not automatically compiled.
+ * Copy into the application after creating its FreeRTOS task structure.
+ * Do NOT rename this file inside bsp unless you want it included in the build.
+ * RawInputEvent is deliberately separate from the game's EV_KNOCK/EV_DIAL.
+ */
+#include "bsp.h"
+#include "FreeRTOS.h"
+#include "queue.h"
+#include "task.h"
+
+typedef struct {
+    BspInput input;
+    BspInputLevels levels;
+    TickType_t captured_tick; /* FreeRTOS ticks, NOT milliseconds. */
+} RawInputEvent;
+
+static QueueHandle_t raw_input_queue;
+volatile uint32_t raw_input_dropped;
+
+static void raw_input_isr(BspInput input, const BspInputLevels *levels, void *context)
+{
+    (void)context;
+    RawInputEvent event = {input, *levels, xTaskGetTickCountFromISR()};
+    BaseType_t task_woken = pdFALSE;
+    if (xQueueSendFromISR(raw_input_queue, &event, &task_woken) != pdPASS) {
+        ++raw_input_dropped;
+    }
+    portYIELD_FROM_ISR(task_woken);
+}
+
+/* Call from a running task AFTER bsp_init() succeeds. That guarantees
+ * scheduler/queue availability before any ISR makes a FreeRTOS call.
+ */
+BspStatus example_raw_inputs_start(void)
+{
+    if (raw_input_queue != NULL) return BSP_BUSY;
+    raw_input_queue = xQueueCreate(32U, sizeof(RawInputEvent));
+    if (raw_input_queue == NULL) return BSP_NOT_READY;
+    bsp_inputs_set_callback(raw_input_isr, NULL);
+
+    const BspInput inputs[] = {BSP_INPUT_TAP, BSP_INPUT_ENCODER_CLK,
+                              BSP_INPUT_ENCODER_DT, BSP_INPUT_ENCODER_SW};
+    for (uint32_t i = 0U; i < 4U; ++i) {
+        BspPull pull = (inputs[i] == BSP_INPUT_TAP) ? BSP_PULL_NONE : BSP_PULL_UP;
+        BspStatus status = bsp_inputs_configure(inputs[i], pull, BSP_EDGE_BOTH);
+        if (status != BSP_OK) {
+            bsp_inputs_set_callback(NULL, NULL);
+            vQueueDelete(raw_input_queue);
+            raw_input_queue = NULL;
+            return status;
+        }
+    }
+    return BSP_OK;
+}
+
+/* Add interpretation in the consumer task after measuring the hardware.
+ * This function blocks with the application's chosen timeout.
+ */
+BaseType_t example_raw_input_receive(RawInputEvent *event, TickType_t wait_ticks)
+{
+    if (raw_input_queue == NULL || event == NULL) return pdFAIL;
+    return xQueueReceive(raw_input_queue, event, wait_ticks);
+}

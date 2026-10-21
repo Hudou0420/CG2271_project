@@ -1,0 +1,585 @@
+/*
+ * Copyright 2016-2026 NXP
+ * All rights reserved.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/**
+ * @file    cg2271_project_mcu.c
+ * @brief   Component bench tests; independently switchable device tests.
+ */
+#include <stdio.h>
+#include "board.h"
+#include "peripherals.h"
+#include "pin_mux.h"
+#include "clock_config.h"
+#include "fsl_debug_console.h"
+#include "fsl_common.h"
+#include "bsp_inputs.h"
+#include "bsp_light.h"
+#include "bsp_outputs.h"
+#include "bsp_board.h"
+#include <limits.h>
+
+#define ENCODER_CENTER_POSITION      0
+/* Redlib stdint.h defines INT32_MIN as (-0x80000000), an unsigned
+ * expression under GCC. Use an explicitly signed decimal bound instead.
+ */
+#define ENCODER_POSITION_MIN         (-2147483647 - 1)
+#define ENCODER_POSITION_MAX         2147483647
+#define BUTTON_STABLE_SAMPLES        20U
+#define PRINT_EVERY_SAMPLES          100U
+#define SENSOR_TEST_PRINTS           1 /* Set to 1 to restore TAP/ENC/DBG output. */
+#define RGB_TEST_ENABLED             0 /* RGB test retained but temporarily disabled. */
+#define BUZZER_TEST_ENABLED          0
+#ifndef RELAY_TEST_ENABLED
+#define RELAY_TEST_ENABLED           1
+#endif
+#define RELAY_TEST_ACTIVE_LOW        0 /* Change to 1 if module energizes on LOW. */
+#define RELAY_HOLD_SAMPLES           2000U
+#ifndef LASER_TEST_ENABLED
+#define LASER_TEST_ENABLED           0
+#endif
+#ifndef LDR_TEST_ENABLED
+#define LDR_TEST_ENABLED             0
+#endif
+#define LASER_TEST_ACTIVE_LOW        0 /* Provisional logic-control polarity. */
+#define LASER_HOLD_SAMPLES           3000U
+#define LDR_SAMPLE_INTERVAL          50U
+#define LDR_MAX_PENDING_POLLS        10U
+#define RGB_HOLD_SAMPLES             1000U
+#define RGB_TEST_BRIGHTNESS           64U /* 0..255 per channel. */
+#define RGB_TEST_USE_GPIO            1 /* Diagnostic: bypass PWM. 0 restores PWM. */
+#define RGB_TEST_ACTIVE_LOW          1 /* Tested common-positive LED at 3.3 V. */
+
+#if RGB_TEST_ENABLED
+typedef struct {
+    const char *name;
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+} RgbTestColour;
+
+static const RgbTestColour rgb_test_colours[] = {
+    {"RED",     RGB_TEST_BRIGHTNESS, 0U, 0U},
+    {"GREEN",   0U, RGB_TEST_BRIGHTNESS, 0U},
+    {"BLUE",    0U, 0U, RGB_TEST_BRIGHTNESS},
+    {"YELLOW",  RGB_TEST_BRIGHTNESS, RGB_TEST_BRIGHTNESS, 0U},
+    {"CYAN",    0U, RGB_TEST_BRIGHTNESS, RGB_TEST_BRIGHTNESS},
+    {"MAGENTA", RGB_TEST_BRIGHTNESS, 0U, RGB_TEST_BRIGHTNESS},
+    {"WHITE",   RGB_TEST_BRIGHTNESS, RGB_TEST_BRIGHTNESS, RGB_TEST_BRIGHTNESS},
+    {"OFF",     0U, 0U, 0U}
+};
+
+#if RGB_TEST_USE_GPIO
+/* Temporary MCU pin test; deliberately bypasses the PWM/output driver.
+ * Nonzero brightness becomes fully ON. Use module/series current limiting.
+ */
+static void rgb_gpio_channel(PORT_Type *port, GPIO_Type *gpio, uint32_t pin, bool on)
+{
+    bool high = on != (RGB_TEST_ACTIVE_LOW != 0);
+    if (high) gpio->PSOR = 1UL << pin;
+    else gpio->PCOR = 1UL << pin;
+    gpio->PDDR |= 1UL << pin;
+    port->PCR[pin] = PORT_PCR_MUX(1) | PORT_PCR_ISF_MASK;
+}
+
+static void rgb_gpio_init(void)
+{
+    SIM->SCGC5 |= SIM_SCGC5_PORTC_MASK | SIM_SCGC5_PORTD_MASK;
+    rgb_gpio_channel(BSP_RGB_RED_PORT, BSP_RGB_RED_GPIO, BSP_RGB_RED_PIN, false);
+    rgb_gpio_channel(BSP_RGB_GREEN_PORT, BSP_RGB_GREEN_GPIO, BSP_RGB_GREEN_PIN, false);
+    rgb_gpio_channel(BSP_RGB_BLUE_PORT, BSP_RGB_BLUE_GPIO, BSP_RGB_BLUE_PIN, false);
+}
+#endif
+
+static BspStatus rgb_test_show(uint32_t index)
+{
+    const RgbTestColour *colour = &rgb_test_colours[index];
+#if RGB_TEST_USE_GPIO
+    rgb_gpio_channel(BSP_RGB_RED_PORT, BSP_RGB_RED_GPIO, BSP_RGB_RED_PIN, colour->red != 0U);
+    rgb_gpio_channel(BSP_RGB_GREEN_PORT, BSP_RGB_GREEN_GPIO, BSP_RGB_GREEN_PIN, colour->green != 0U);
+    rgb_gpio_channel(BSP_RGB_BLUE_PORT, BSP_RGB_BLUE_GPIO, BSP_RGB_BLUE_PIN, colour->blue != 0U);
+    PRINTF("RGB GPIO %s: pad_R=%u pad_G=%u pad_B=%u (active_low=%u)\r\n",
+           colour->name,
+           (unsigned int)((BSP_RGB_RED_GPIO->PDIR >> BSP_RGB_RED_PIN) & 1U),
+           (unsigned int)((BSP_RGB_GREEN_GPIO->PDIR >> BSP_RGB_GREEN_PIN) & 1U),
+           (unsigned int)((BSP_RGB_BLUE_GPIO->PDIR >> BSP_RGB_BLUE_PIN) & 1U),
+           RGB_TEST_ACTIVE_LOW);
+    return BSP_OK;
+#else
+    BspStatus status = bsp_rgb_set(colour->red, colour->green, colour->blue);
+    if (status == BSP_OK) {
+        PRINTF("RGB %s: R=%u G=%u B=%u\r\n", colour->name,
+               (unsigned int)colour->red, (unsigned int)colour->green,
+               (unsigned int)colour->blue);
+    }
+    return status;
+#endif
+}
+#endif /* RGB_TEST_ENABLED */
+
+#if BUZZER_TEST_ENABLED
+typedef struct {
+    uint32_t frequency_hz;
+    uint32_t hold_samples; /* One loop sample includes a 1 ms busy delay. */
+} BuzzerTestStep;
+
+static const BuzzerTestStep buzzer_test_steps[] = {
+    {500U, 500U}, {0U, 250U},
+    {1000U, 500U}, {0U, 250U},
+    {2000U, 500U}, {0U, 1000U}
+};
+
+static BspStatus buzzer_test_play(uint32_t index)
+{
+    const BuzzerTestStep *step = &buzzer_test_steps[index];
+    BspStatus status = bsp_buzzer_set_frequency(step->frequency_hz);
+    if (status == BSP_OK) {
+        if (step->frequency_hz == 0U) {
+            PRINTF("BUZZER OFF (~%u ms)\r\n", (unsigned int)step->hold_samples);
+        } else {
+            PRINTF("BUZZER %u Hz, 50%% duty (~%u ms)\r\n",
+                   (unsigned int)step->frequency_hz, (unsigned int)step->hold_samples);
+        }
+    }
+    return status;
+}
+#endif /* BUZZER_TEST_ENABLED */
+
+#if RELAY_TEST_ENABLED
+static BspStatus relay_test_set(bool on)
+{
+    BspStatus status = bsp_relay_set(on);
+    if (status == BSP_OK) {
+        bool high = on != (RELAY_TEST_ACTIVE_LOW != 0);
+        PRINTF("RELAY requested=%s, signal=%s, active_low=%u\r\n",
+               on ? "ON" : "OFF", high ? "HIGH" : "LOW", RELAY_TEST_ACTIVE_LOW);
+    }
+    return status;
+}
+#endif
+
+/* Raw edges are counted so a short tap is visible between console prints.
+ * No debounce or knock interpretation. Never print inside the ISR.
+ */
+static volatile uint32_t tap_edge_count;
+static volatile uint32_t encoder_clk_edges;
+static volatile uint32_t encoder_dt_edges;
+static volatile uint32_t encoder_accepted_plus;
+static volatile uint32_t encoder_accepted_minus;
+static volatile uint32_t encoder_invalid;
+static volatile uint32_t encoder_bounce_returns;
+static volatile uint8_t encoder_irq_clk;
+static volatile uint8_t encoder_irq_dt;
+static volatile uint32_t button_edge_count;
+static volatile int32_t encoder_position;
+static volatile int8_t encoder_last_direction;
+static uint8_t encoder_previous;
+static int8_t encoder_partial_step;
+static bool encoder_synchronized;
+
+_Static_assert(ENCODER_POSITION_MIN < 0, "Encoder lower bound must be signed");
+
+static uint8_t encoder_state(const BspInputLevels *levels)
+{
+    return (uint8_t)((levels->clk ? 2U : 0U) | (levels->dt ? 1U : 0U));
+}
+
+static bool encoder_is_endpoint(uint8_t state)
+{
+    return state == 0U || state == 3U; /* CLK=DT: 00 or 11. */
+}
+
+static void encoder_decode(const BspInputLevels *levels)
+{
+    static const int8_t transition[16] = {
+         0, -1,  1,  0,
+         1,  0,  0, -1,
+        -1,  0,  0,  1,
+         0,  1, -1,  0
+    };
+    uint8_t current = encoder_state(levels);
+    uint8_t previous = encoder_previous;
+    encoder_previous = current;
+    if (current == previous) return; /* Same snapshot can trigger two callbacks. */
+    if ((current ^ previous) == 3U) {
+        ++encoder_invalid;
+        encoder_partial_step = 0;
+        encoder_synchronized = encoder_is_endpoint(current);
+        return;
+    }
+    if (!encoder_synchronized) {
+        encoder_synchronized = encoder_is_endpoint(current);
+        encoder_partial_step = 0;
+        return;
+    }
+    encoder_partial_step = (int8_t)(encoder_partial_step +
+                                    transition[(previous << 2U) | current]);
+    if (!encoder_is_endpoint(current)) return;
+
+    /* Count only a complete ordered half-cycle between 00 and 11.
+     * e.g. 11->01->00 is +; 11->10->00 is -.
+     * A contact bouncing 11->01->11 returns to zero and is not a step.
+     */
+    if (encoder_partial_step == 2) {
+        if (encoder_position < ENCODER_POSITION_MAX) {
+            ++encoder_position;
+            ++encoder_accepted_plus;
+        }
+        encoder_last_direction = 1;
+    } else if (encoder_partial_step == -2) {
+        if (encoder_position > ENCODER_POSITION_MIN) {
+            --encoder_position;
+            ++encoder_accepted_minus;
+        }
+        encoder_last_direction = -1;
+    } else {
+        ++encoder_bounce_returns;
+    }
+    encoder_partial_step = 0;
+}
+
+static void input_edge_callback(BspInput input, const BspInputLevels *levels,
+                                void *context)
+{
+    (void)context;
+    if (input == BSP_INPUT_TAP) {
+        ++tap_edge_count;
+    } else if (input == BSP_INPUT_ENCODER_SW) {
+        ++button_edge_count;
+    } else if (input == BSP_INPUT_ENCODER_CLK || input == BSP_INPUT_ENCODER_DT) {
+        if (input == BSP_INPUT_ENCODER_CLK) ++encoder_clk_edges;
+        else ++encoder_dt_edges;
+        encoder_irq_clk = levels->clk ? 1U : 0U;
+        encoder_irq_dt = levels->dt ? 1U : 0U;
+        encoder_decode(levels);
+    }
+}
+
+/*
+ * @brief   Application entry point.
+ */
+int main(void) {
+
+    /* Init board hardware. */
+    BOARD_InitBootPins();
+    BOARD_InitBootClocks();
+    BOARD_InitBootPeripherals();
+#ifndef BOARD_INIT_DEBUG_CONSOLE_PERIPHERAL
+    /* Init FSL debug console. */
+    BOARD_InitDebugConsole();
+#endif
+
+    PRINTF("Component test boot: debug console ready.\r\n");
+
+#if RELAY_TEST_ENABLED || LASER_TEST_ENABLED || BUZZER_TEST_ENABLED || (RGB_TEST_ENABLED && !RGB_TEST_USE_GPIO)
+    /* Configurable polarity for either common-anode or common-cathode RGB.
+     * Output init establishes RGB off, buzzer silent, relay inactive, and
+     * laser logic output inactive. The laser test opts in to its GPIO.
+     */
+    BspOutputConfig output_config;
+    bsp_outputs_default_config(&output_config);
+    output_config.rgb_active_low = RGB_TEST_ACTIVE_LOW != 0;
+    output_config.relay_active_low = RELAY_TEST_ACTIVE_LOW != 0;
+    output_config.enable_laser_signal = LASER_TEST_ENABLED != 0;
+    output_config.laser_active_low = LASER_TEST_ACTIVE_LOW != 0;
+    BspStatus output_status = bsp_outputs_init(&output_config);
+    if (output_status != BSP_OK) {
+        PRINTF("Output initialization failed: status=%u\r\n", (unsigned int)output_status);
+        return 1;
+    }
+    PRINTF("Output initialization complete; RGB starts OFF.\r\n");
+#endif
+#if LDR_TEST_ENABLED
+    PRINTF("LDR ADC initialization: PTB0/J4-2, ADC0_SE8.\r\n");
+    BspStatus light_status = bsp_light_init();
+    if (light_status != BSP_OK) {
+#if LASER_TEST_ENABLED
+        (void)bsp_laser_set(false);
+#endif
+        PRINTF("LDR initialization failed: status=%u\r\n", (unsigned int)light_status);
+        return 1;
+    }
+    PRINTF("LDR ADC ready: raw range 0..4095; no beam threshold assumed.\r\n");
+#endif
+#if RGB_TEST_ENABLED && RGB_TEST_USE_GPIO
+    rgb_gpio_init();
+    PRINTF("RGB GPIO diagnostic: PWM bypassed; common lead configured for %s.\r\n",
+           RGB_TEST_ACTIVE_LOW ? "3.3 V (common anode)" : "GND (common cathode)");
+#endif
+
+    /* Preserve tap/encoder input initialization and decoding. */
+    bsp_inputs_init();
+    /* Establish encoder pulls and initial state before enabling its edges. */
+    const BspInput encoder_inputs[] = {
+        BSP_INPUT_ENCODER_CLK, BSP_INPUT_ENCODER_DT, BSP_INPUT_ENCODER_SW
+    };
+    for (uint32_t n = 0U; n < 3U; ++n) {
+        BspStatus setup = bsp_inputs_configure(encoder_inputs[n], BSP_PULL_UP,
+                                               BSP_EDGE_DISABLED);
+        if (setup != BSP_OK) {
+            PRINTF("Encoder setup failed: status=%u\r\n", (unsigned int)setup);
+            return 1;
+        }
+    }
+    BspInputLevels initial;
+    if (bsp_inputs_read_all(&initial) != BSP_OK) return 1;
+    encoder_previous = encoder_state(&initial);
+    encoder_synchronized = encoder_is_endpoint(encoder_previous);
+    /* The physical position at startup is the arbitrary reference point. */
+    encoder_position = ENCODER_CENTER_POSITION;
+    bool button_candidate = initial.sw;
+    bool button_stable_high = true; /* Assumed released; SW is active-low. */
+    uint32_t button_stable_samples = 0U;
+#if SENSOR_TEST_PRINTS
+    uint32_t print_samples = 0U;
+#endif
+#if RGB_TEST_ENABLED
+    uint32_t rgb_samples = 0U;
+    uint32_t rgb_phase = 0U;
+#endif
+#if BUZZER_TEST_ENABLED
+    uint32_t buzzer_samples = 0U;
+    uint32_t buzzer_phase = 0U;
+#endif
+#if LASER_TEST_ENABLED
+    bool laser_on = true; /* Requested logic state, not optical feedback. */
+    uint32_t laser_samples = 0U;
+#endif
+#if RELAY_TEST_ENABLED
+    bool relay_on = false; /* Start with logical OFF, then toggle. */
+    uint32_t relay_samples = 0U;
+#endif
+#if LDR_TEST_ENABLED
+    uint32_t ldr_samples = 0U;
+    uint32_t ldr_pending_polls = 0U;
+    bool ldr_pending = false;
+#endif
+
+    bsp_inputs_set_callback(input_edge_callback, NULL);
+    BspStatus status = bsp_inputs_configure(BSP_INPUT_TAP, BSP_PULL_NONE,
+                                            BSP_EDGE_BOTH);
+    if (status != BSP_OK) {
+        PRINTF("Tap initialization failed: status=%u\r\n", (unsigned int)status);
+        return 1;
+    }
+    for (uint32_t n = 0U; n < 3U; ++n) {
+        status = bsp_inputs_configure(encoder_inputs[n], BSP_PULL_UP, BSP_EDGE_BOTH);
+        if (status != BSP_OK) {
+            PRINTF("Encoder interrupt setup failed: status=%u\r\n", (unsigned int)status);
+            return 1;
+        }
+    }
+
+#if SENSOR_TEST_PRINTS
+    PRINTF("Tap test: signal on PTC0 / J1 pin 5; no internal pull.\r\n");
+    PRINTF("S=1 means HIGH, S=0 means LOW. Raw edges include bounce.\r\n");
+    PRINTF("Encoder: CLK=PTC4/J1-7, DT=PTC6/J1-9, SW=PTC7/J1-11.\r\n");
+    PRINTF("Encoder v2: CLK/DT both-edge sequence decoder; SW LOW=pressed.\r\n");
+    PRINTF("One step per ordered 00<->11 sequence; partial bounce cancels.\r\n");
+    PRINTF("Encoder position is relative to startup (center=%d).\r\n",
+           ENCODER_CENTER_POSITION);
+    PRINTF("Direction +/- is provisional: verify against physical rotation.\r\n");
+#endif
+#if RGB_TEST_ENABLED
+    PRINTF("RGB observed colours: RED=PTC2/J4-10, GREEN=PTC1/J4-12, BLUE=PTD2/J2-4.\r\n");
+    PRINTF("RGB cycles every ~1 second; mode=%s, active_low=%u.\r\n",
+           RGB_TEST_USE_GPIO ? "GPIO ON/OFF" : "PWM", RGB_TEST_ACTIVE_LOW);
+    if (rgb_test_show(rgb_phase) != BSP_OK) return 1;
+#endif
+#if BUZZER_TEST_ENABLED
+    PRINTF("Buzzer test: S=PTA12/J1-8 (TPM1_CH0); RGB cycle disabled=%u.\r\n",
+           RGB_TEST_ENABLED ? 0U : 1U);
+    PRINTF("Repeating 500 / 1000 / 2000 Hz tones separated by silence.\r\n");
+    status = buzzer_test_play(buzzer_phase);
+    if (status != BSP_OK) {
+        PRINTF("Buzzer start failed: status=%u\r\n", (unsigned int)status);
+        return 1;
+    }
+#endif
+#if LASER_TEST_ENABLED
+    PRINTF("Laser logic control=PTD7/J2-10; toggles every ~3 s.\r\n");
+    status = bsp_laser_set(laser_on);
+    if (status != BSP_OK) {
+        PRINTF("Laser start failed: status=%u\r\n", (unsigned int)status);
+        return 1;
+    }
+    PRINTF("LASER requested=ON, active_low=%u\r\n", LASER_TEST_ACTIVE_LOW);
+#endif
+#if LDR_TEST_ENABLED
+    PRINTF("LDR analog=PTB0/J4-2; sampled every ~50 ms.\r\n");
+    PRINTF("Block/unblock light at the LDR to compare raw readings.\r\n");
+#endif
+#if RELAY_TEST_ENABLED
+    PRINTF("Relay test: signal=PTD6/J2-8; toggles every ~2 s; test contacts without a load.\r\n");
+    status = relay_test_set(relay_on);
+    if (status != BSP_OK) {
+        PRINTF("Relay start failed: status=%u\r\n", (unsigned int)status);
+        return 1;
+    }
+#endif
+
+    /* Standalone bench test; no FreeRTOS scheduler is started here. */
+    while(1) {
+        BspInputLevels levels;
+        status = bsp_inputs_read_all(&levels);
+        if (status == BSP_OK) {
+            /* Button must stay at its new level for 20 loop samples. */
+            if (levels.sw != button_candidate) {
+                button_candidate = levels.sw;
+                button_stable_samples = 1U;
+            } else if (button_stable_samples < BUTTON_STABLE_SAMPLES) {
+                ++button_stable_samples;
+            }
+            if (button_stable_samples >= BUTTON_STABLE_SAMPLES &&
+                button_stable_high != button_candidate) {
+                button_stable_high = button_candidate;
+            }
+
+#if SENSOR_TEST_PRINTS
+            if (print_samples == 0U) {
+                /* Very short critical section: copy only, print afterwards. */
+                uint32_t mask = __get_PRIMASK();
+                __disable_irq();
+                uint32_t taps = tap_edge_count;
+                int32_t position = encoder_position;
+                uint32_t clk_edges = encoder_clk_edges;
+                uint32_t dt_edges = encoder_dt_edges;
+                uint32_t accepted_plus = encoder_accepted_plus;
+                uint32_t accepted_minus = encoder_accepted_minus;
+                uint32_t invalid = encoder_invalid;
+                uint32_t bounce_returns = encoder_bounce_returns;
+                uint32_t sw_edges = button_edge_count;
+                int8_t direction = encoder_last_direction;
+                uint8_t irq_clk = encoder_irq_clk;
+                uint8_t irq_dt = encoder_irq_dt;
+                __set_PRIMASK(mask);
+
+                PRINTF("TAP S=%u (%s), raw edges=%u\r\n",
+                       levels.tap ? 1U : 0U, levels.tap ? "HIGH" : "LOW",
+                       (unsigned int)taps);
+                /* Minimal SDK PRINTF does not format negative %d correctly.
+                 * Print sign explicitly and an unsigned magnitude; the
+                 * unsigned subtraction is also safe for the minimum value.
+                 */
+                uint32_t magnitude = position < 0 ? 0U - (uint32_t)position : (uint32_t)position;
+                bool balanced = (uint32_t)position == (uint32_t)ENCODER_CENTER_POSITION +
+                                                    accepted_plus - accepted_minus;
+                PRINTF("ENC position=%s%u, switch=%s\r\n",
+                       position < 0 ? "-" : "+", (unsigned int)magnitude,
+                       button_stable_high ? "RELEASED" : "PRESSED");
+                PRINTF("DBG CLK=%u DT=%u SW=%u clk_edges=%u dt_edges=%u accepted_plus=%u "
+                       "accepted_minus=%u invalid=%u bounce=%u sw_edges=%u last_dir=%s "
+                       "irq_CLK=%u irq_DT=%u balance=%s\r\n",
+                       levels.clk ? 1U : 0U, levels.dt ? 1U : 0U,
+                       levels.sw ? 1U : 0U, (unsigned int)clk_edges,
+                       (unsigned int)dt_edges, (unsigned int)accepted_plus,
+                       (unsigned int)accepted_minus, (unsigned int)invalid,
+                       (unsigned int)bounce_returns, (unsigned int)sw_edges,
+                       direction > 0 ? "+" : (direction < 0 ? "-" : "none"),
+                       (unsigned int)irq_clk, (unsigned int)irq_dt,
+                       balanced ? "OK" : "BAD");
+            }
+#endif
+        } else {
+            PRINTF("Input read failed: status=%u\r\n", (unsigned int)status);
+        }
+#if SENSOR_TEST_PRINTS
+        print_samples = (print_samples + 1U) % PRINT_EVERY_SAMPLES;
+#endif
+#if RGB_TEST_ENABLED
+        /* Advance without a long LED delay; inputs keep being serviced. */
+        if (++rgb_samples >= RGB_HOLD_SAMPLES) {
+            rgb_samples = 0U;
+            rgb_phase = (rgb_phase + 1U) %
+                        (sizeof(rgb_test_colours) / sizeof(rgb_test_colours[0]));
+            status = rgb_test_show(rgb_phase);
+            if (status != BSP_OK) {
+                PRINTF("RGB write failed: status=%u\r\n", (unsigned int)status);
+                return 1;
+            }
+        }
+#endif
+#if BUZZER_TEST_ENABLED
+        /* PWM runs in hardware; no tone-length delay blocks sensor handling. */
+        if (++buzzer_samples >= buzzer_test_steps[buzzer_phase].hold_samples) {
+            buzzer_samples = 0U;
+            buzzer_phase = (buzzer_phase + 1U) %
+                           (sizeof(buzzer_test_steps) / sizeof(buzzer_test_steps[0]));
+            status = buzzer_test_play(buzzer_phase);
+            if (status != BSP_OK) {
+                (void)bsp_buzzer_set_frequency(0U);
+                PRINTF("Buzzer write failed: status=%u\r\n", (unsigned int)status);
+                return 1;
+            }
+        }
+#endif
+#if RELAY_TEST_ENABLED
+        if (++relay_samples >= RELAY_HOLD_SAMPLES) {
+            relay_samples = 0U;
+            relay_on = !relay_on;
+            status = relay_test_set(relay_on);
+            if (status != BSP_OK) {
+                (void)bsp_relay_set(false);
+                PRINTF("Relay write failed: status=%u\r\n", (unsigned int)status);
+                return 1;
+            }
+        }
+#endif
+#if LASER_TEST_ENABLED
+        /* Toggle before starting this iteration's ADC work. Discard any
+         * sample spanning a transition rather than label it with a new state.
+         */
+        if (++laser_samples >= LASER_HOLD_SAMPLES) {
+            laser_samples = 0U;
+#if LDR_TEST_ENABLED
+            bsp_light_cancel();
+            ldr_pending = false;
+            ldr_samples = 0U;
+#endif
+            laser_on = !laser_on;
+            status = bsp_laser_set(laser_on);
+            if (status != BSP_OK) {
+                (void)bsp_laser_set(false);
+                PRINTF("Laser write failed: status=%u\r\n", (unsigned int)status);
+                return 1;
+            }
+            PRINTF("LASER requested=%s\r\n", laser_on ? "ON" : "OFF");
+        }
+#endif
+#if LDR_TEST_ENABLED
+        if (ldr_pending) {
+            uint16_t raw;
+            status = bsp_light_try_read(&raw);
+            if (status == BSP_OK) {
+                ldr_pending = false;
+#if LASER_TEST_ENABLED
+                const char *laser_state = laser_on ? "ON" : "OFF";
+#else
+                const char *laser_state = "UNCONTROLLED (laser test disabled)";
+#endif
+                PRINTF("LDR raw=%u/4095, laser_requested=%s\r\n",
+                       (unsigned int)raw, laser_state);
+            } else if (status != BSP_BUSY || ++ldr_pending_polls >= LDR_MAX_PENDING_POLLS) {
+                bsp_light_cancel();
+                ldr_pending = false;
+                PRINTF("LDR read failed: status=%u%s\r\n", (unsigned int)status,
+                       status == BSP_BUSY ? " (conversion deadline exceeded)" : "");
+            }
+        } else if (++ldr_samples >= LDR_SAMPLE_INTERVAL) {
+            ldr_samples = 0U;
+            status = bsp_light_start();
+            if (status == BSP_OK) {
+                ldr_pending = true;
+                ldr_pending_polls = 0U;
+            } else {
+                PRINTF("LDR start failed: status=%u\r\n", (unsigned int)status);
+            }
+        }
+#endif
+        SDK_DelayAtLeastUs(1000U, SystemCoreClock);
+    }
+    return 0 ;
+}

@@ -38,9 +38,9 @@ typedef enum {
     EV_NONE = 0,
     EV_ARM,          /* value = code packed as d0*100 + d1*10 + d2   (tComms)  */
     EV_DISARM,       /*                                              (tComms)  */
-    EV_KNOCK,        /* tick_ms = time of the tap                    (tap ISR) */
-    EV_DIAL,         /* value = +1 or -1                             (enc ISR) */
-    EV_PRESS,        /* encoder button: confirm digit                (enc ISR) */
+    EV_KNOCK,        /* tick_ms = captured tap time                   (tInput) */
+    EV_DIAL,         /* value = +1/-1 calibrated round-index change   (tInput) */
+    EV_PRESS,        /* debounced encoder button: confirm digit       (tInput) */
     EV_BEAM_BROKEN,  /*                                              (tTripwire)*/
     EV_TAMPER,       /*                                              (tComms)  */
     EV_LOCKOUT_DONE  /* generated INSIDE tGame, nobody else sends it           */

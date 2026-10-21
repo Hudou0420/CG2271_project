@@ -3,7 +3,8 @@
  *
  * FreeRTOS skeleton for The Vault.
  *   - tGame      : REAL (Person 1). Owns the FSM.
- *   - tTripwire  : STUB (Person 2 fills in)
+ *   - tInput     : sensor adapter; calibrated encoder rounds, taps, button
+ *   - tTripwire  : polled LDR service; threshold gated by configuration
  *   - tComms     : STUB (Person 3 fills in)
  *   - tActuator  : STUB (Person 2 fills in)
  *   - tSelfTest  : TEMPORARY. Injects fake events so you can watch the FSM
@@ -22,11 +23,16 @@
 #include "pin_mux.h"
 #include "clock_config.h"
 #include "fsl_debug_console.h"
+#include "bsp.h"
 
 #include "vault_rtos.h"
 #include "vault_fsm.h"
+#include "vault_sensors.h"
+#include "vault_sensor_config.h"
 
-#define VAULT_SELF_TEST  1     /* 1 = run the fake-event demo, 0 = off */
+#ifndef VAULT_SELF_TEST
+#define VAULT_SELF_TEST  0     /* 0 = real sensors, 1 = synthetic FSM demo only */
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Shared objects                                                      */
@@ -41,6 +47,23 @@ static uint32_t now_ms(void)
 {
     return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
 }
+
+#if VAULT_LOG_INPUT_EVENTS
+static const char *event_name(EventType type)
+{
+    switch (type) {
+    case EV_ARM: return "EV_ARM";
+    case EV_DISARM: return "EV_DISARM";
+    case EV_KNOCK: return "EV_KNOCK";
+    case EV_DIAL: return "EV_DIAL";
+    case EV_PRESS: return "EV_PRESS";
+    case EV_BEAM_BROKEN: return "EV_BEAM_BROKEN";
+    case EV_TAMPER: return "EV_TAMPER";
+    case EV_LOCKOUT_DONE: return "EV_LOCKOUT_DONE";
+    default: return "EV_NONE";
+    }
+}
+#endif
 
 /* ------------------------------------------------------------------ */
 /* tGame  (Person 1)  -- the ONLY task that changes gGame              */
@@ -75,6 +98,12 @@ static void tGame(void *p)
         if (ev.tick_ms == 0) {              /* sender didn't timestamp it */
             ev.tick_ms = now_ms();
         }
+#if VAULT_LOG_INPUT_EVENTS
+        /* Explicit sign avoids the minimal SDK formatter's negative %d issue. */
+        uint32_t magnitude = ev.value < 0 ? 0U - (uint32_t)ev.value : (uint32_t)ev.value;
+        PRINTF("[input] %s value=%s%u captured_ms=%u\r\n", event_name(ev.type),
+               ev.value < 0 ? "-" : "+", (unsigned int)magnitude, (unsigned int)ev.tick_ms);
+#endif
 
         /* --- run the FSM while holding the mutex --- */
         TxMsg        tx[3];
@@ -102,19 +131,18 @@ static void tGame(void *p)
 }
 
 /* ------------------------------------------------------------------ */
-/* tTripwire  (STUB - Person 2)                                        */
+/* tTripwire  (Person 2 sensor service)                                */
 /* ------------------------------------------------------------------ */
 static void tTripwire(void *p)
 {
+#if VAULT_SELF_TEST
+    (void)p;
     while (1) {
-        /* Person 2: every ~50 ms
-         *   1. take xStateMutex, copy armed = vault_is_armed(&gGame), give it back
-         *   2. if armed, read the ADC; if below threshold for N samples in a row:
-         *          VaultEvent ev = { EV_BEAM_BROKEN, 0, 0 };
-         *          xQueueSend(xInputQueue, &ev, 0);
-         */
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+#else
+    vault_tripwire_task(p);
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,6 +254,17 @@ int main(void)
 
     PRINTF("The Vault - core skeleton starting\r\n");
 
+    /* Local hardware BSP: keep its existing public interfaces and pin map.
+     * Inputs start with IRQ sources disabled; the hardware task/ISR adapters
+     * enables them after the scheduler and queues are ready. An individual
+     * device init failure is logged; the sensor services report availability.
+     */
+    BspStatus bspStatus = bsp_init(NULL);
+    if (bspStatus != BSP_OK) {
+        PRINTF("BSP initialization reported status %u; inspect sensor diagnostics.\r\n",
+               (unsigned int)bspStatus);
+    }
+
     vault_init(&gGame);
 
     xInputQueue  = xQueueCreate(INPUT_Q_LEN, sizeof(VaultEvent));
@@ -238,12 +277,27 @@ int main(void)
         while (1) { }
     }
 
-    xTaskCreate(tTripwire, "tripwire", configMINIMAL_STACK_SIZE + 100, NULL, PRIO_TRIPWIRE, NULL);
-    xTaskCreate(tGame,     "game",     configMINIMAL_STACK_SIZE + 150, NULL, PRIO_GAME,     NULL);
-    xTaskCreate(tComms,    "comms",    configMINIMAL_STACK_SIZE + 100, NULL, PRIO_COMMS,    NULL);
-    xTaskCreate(tActuator, "actuator", configMINIMAL_STACK_SIZE + 100, NULL, PRIO_ACTUATOR, NULL);
+#if !VAULT_SELF_TEST
+    if (!vault_sensors_init() ||
+        xTaskCreate(vault_input_task, "inputs", configMINIMAL_STACK_SIZE + 180,
+                    NULL, VAULT_INPUT_TASK_PRIORITY, NULL) != pdPASS) {
+        PRINTF("ERROR: could not create sensor service (check heap).\r\n");
+        while (1) { }
+    }
+#endif
+    if (xTaskCreate(tTripwire, "tripwire", configMINIMAL_STACK_SIZE + 160, NULL, PRIO_TRIPWIRE, NULL) != pdPASS ||
+        xTaskCreate(tGame, "game", configMINIMAL_STACK_SIZE + 150, NULL, PRIO_GAME, NULL) != pdPASS ||
+        xTaskCreate(tComms, "comms", configMINIMAL_STACK_SIZE + 100, NULL, PRIO_COMMS, NULL) != pdPASS ||
+        xTaskCreate(tActuator, "actuator", configMINIMAL_STACK_SIZE + 100, NULL, PRIO_ACTUATOR, NULL) != pdPASS) {
+        PRINTF("ERROR: could not create game tasks (check heap).\r\n");
+        while (1) { }
+    }
 #if VAULT_SELF_TEST
-    xTaskCreate(tSelfTest, "selftest", configMINIMAL_STACK_SIZE + 100, NULL, PRIO_ACTUATOR, NULL);
+    if (xTaskCreate(tSelfTest, "selftest", configMINIMAL_STACK_SIZE + 100,
+                    NULL, PRIO_ACTUATOR, NULL) != pdPASS) {
+        PRINTF("ERROR: could not create self-test task.\r\n");
+        while (1) { }
+    }
 #endif
 
     vTaskStartScheduler();
