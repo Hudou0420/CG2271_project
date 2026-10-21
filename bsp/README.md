@@ -26,8 +26,8 @@ component end is outside this table.
 | Passive buzzer signal | J1-8 / D3 | PTA12 | TPM1_CH0 | ALT1 low while silent; ALT3 for PWM |
 | Relay control | J2-8 / D11 | PTD6 | GPIO output | ALT1, logically off |
 | Optional laser logic control | J2-10 / D12 | PTD7 | GPIO output when enabled | Default is input, no pull |
-| **Reserved: Person 3 UART2 TX** | **J4-5** | **PTE22** | **UART2_TX ALT4** | **Not configured by BSP** |
-| **Reserved: Person 3 UART2 RX** | **J4-7** | **PTE23** | **UART2_RX ALT4** | **Not configured by BSP** |
+| **Reserved: Person 3 ESP32 link TX** | **J2-18** | **PTE0** | **LPUART1_TX ALT3** | **Configured by source/vault_comms.c, not the BSP** |
+| **Reserved: Person 3 ESP32 link RX** | **J2-20** | **PTE1** | **LPUART1_RX ALT3** | **Configured by source/vault_comms.c, not the BSP** |
 
 Board power contacts: J3-8 is 3V3_OUT, J3-10 is 5V0_OUT, and J3-12/J3-14
 are GND. These identify board rails only, not which rail each module needs.
@@ -49,8 +49,8 @@ FRDM-MCXC444                       Module-side signal
   J2-10  PTD7 - - - - - - - - - - Optional laser logic control
   GND --------------------------- Common signal ground
 
-  J4-5   PTE22 ================== Person 3: UART2 TX
-  J4-7   PTE23 ================== Person 3: UART2 RX
+  J2-18  PTE0  ================== Person 3: LPUART1 TX -> ESP32 GPIO5
+  J2-20  PTE1  ================== Person 3: LPUART1 RX <- ESP32 GPIO4
 ```
 
 PTD7 is a logic output only. If the laser is powered/switched solely through
@@ -68,7 +68,8 @@ does not establish which physical module pin is power or signal.
   pitch. TPM2 is unused. The shared TPM clock source is IRC48M (48 MHz).
   A future user of TPM2 must keep that shared source selection.
 - GPIOC 1/2 and GPIOD 2/6/7, GPIOA 12: BSP outputs as listed above.
-- PTE22/PTE23 and UART2 are untouched. PTA1/PTA2 debug LPUART0 and
+- PTE0/PTE1 and LPUART1 belong to the ESP32 link (source/vault_comms.c).
+  PTE22/PTE23 and UART2 are now free. PTA1/PTA2 debug LPUART0 and
   PTA0/PTA3 SWD are untouched. Existing on-board RGB pins PTE29/PTE31/PTD5
   and board button pins PTA4/PTC3 are not used.
 - Some selected pins also have LCD or expansion-header functions. Do not

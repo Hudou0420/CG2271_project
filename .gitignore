@@ -2,3 +2,15 @@
 /Debug/
 /Release/
 /.metadata/
+# Debug launch configs hold each person's probe serial number
+*.launch
+
+.DS_Store
+
+# PlatformIO (ESP32)
+.pio/
+.vscode/
+__pycache__/
+
+# API keys and Wi-Fi credentials (keep out of the repo and the submission)
+secrets.h

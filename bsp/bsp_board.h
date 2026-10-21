@@ -3,7 +3,8 @@
 
 /* FRDM-MCXC444 (MCXC444VLH). This is the MCU-side allocation only.
  * Sources: board/pin_mux.c header mapping and NXP MCXC444QSG / datasheet.
- * UART2 PTE22/J4-5 and PTE23/J4-7, debug LPUART0 PTA1/PTA2, and
+ * ESP32 link LPUART1 PTE0/J2-18 (TX) and PTE1/J2-20 (RX, source/vault_comms.c),
+ * debug LPUART0 PTA1/PTA2, and
  * SWD PTA0/PTA3 are reserved. Do not reconfigure these from this BSP.
  */
 #include "fsl_device_registers.h"
