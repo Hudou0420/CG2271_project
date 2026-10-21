@@ -25,9 +25,23 @@
 // ---- Status heartbeat -----------------------------------------------------
 #define MCU_OFFLINE_MS        3000   // no STATUS for this long -> MCU offline
 
+// ---- Cloud link (Firebase Realtime Database, see web/README.md) ------------
+// Wi-Fi and Firebase credentials live in secrets.h (see secrets.example.h).
+#define CLOUD_ROOT                "/vault" // every path below sits under this
+#define CLOUD_COMMAND_POLL_MS     1000     // check /vault/commands this often
+#define CLOUD_STATUS_MIN_MS       1000     // publish /vault/status at most this often
+#define CLOUD_STATUS_HEARTBEAT_MS 10000    // and at least this often
+#define CLOUD_LIGHT_DELTA         100      // light change that counts as a change
+#define CLOUD_HTTP_TIMEOUT_MS     5000
+#define CLOUD_RETRY_MS            2000     // wait after a failed request
+#define CLOUD_EVENT_QUEUE_LEN     16
+#define CLOUD_PLAYER_MAX          24       // max player-name length from the dashboard
+
 // ---- Task setup -----------------------------------------------------------
 // Arduino's loop() (the debug console) runs at priority 1.
 #define LINK_TASK_PRIO        3
 #define IMU_TASK_PRIO         2
-#define TASK_STACK_WORDS      4096
+#define CLOUD_TASK_PRIO       1      // network waits must never delay tLink/tImu
+#define TASK_STACK_WORDS      4096   // ESP-IDF stack sizes are in bytes
+#define CLOUD_TASK_STACK      12288  // HTTPS + JSON need more
 #define LINK_TX_QUEUE_LEN     8

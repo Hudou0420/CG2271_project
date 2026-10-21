@@ -10,6 +10,7 @@
 # PlatformIO (ESP32)
 .pio/
 .vscode/
+__pycache__/
 
 # API keys and Wi-Fi credentials (keep out of the repo and the submission)
 secrets.h

@@ -2,8 +2,9 @@
 
 Board: **ESP32-S2-DevKitM-1** (built with PlatformIO's `esp32-s2-saola-1` definition).
 
-This version implements the UART link to the MCXC444 and tamper detection with the MPU-6050.
-Wi-Fi, the dashboard and the cloud calls come later.
+This version implements the UART link to the MCXC444, tamper detection with the MPU-6050,
+and the link to the web dashboard through Firebase Realtime Database (see [web/README.md](../web/README.md)).
+The LLM game master comes later.
 
 ## Wiring
 
@@ -45,7 +46,28 @@ imu                 stream IMU samples (for tuning thresholds)
 raw                 hex-dump every UART byte
 sensors             toggle printing the MCU's sensor snapshot when it changes
 stats               link counters, vault state, MCU sensors, latest IMU sample
+cloud               Wi-Fi / Firebase status, request counters, last error
 ```
+
+## Web dashboard link (Firebase)
+
+1. Set up the Firebase project once, as described in [web/README.md](../web/README.md#firebase-project-setup-once).
+2. Copy `include/secrets.example.h` to `include/secrets.h` and fill in the Wi-Fi name and password, the database URL and the Web API key.
+   `secrets.h` is in `.gitignore`: never commit it or put it in the submission zip. Without it the firmware still builds, with the cloud link off.
+3. Flash and open the monitor. Within a few seconds you should see `Wi-Fi connected`, `signed in to Firebase` and `connected to the database`.
+   `cloud` shows the counters and the last error if something fails.
+
+Until the real dashboard exists, `tools/dashboard_sim.py` plays its part, using the same database paths (standard-library Python, reads `secrets.h`):
+
+```sh
+python3 tools/dashboard_sim.py watch                   # live status + new events
+python3 tools/dashboard_sim.py arm 427 --player Alice  # arm from the "web"
+python3 tools/dashboard_sim.py disarm
+python3 tools/dashboard_sim.py events -n 20
+python3 tools/dashboard_sim.py leaderboard
+```
+
+Wi-Fi and HTTPS run in their own lowest-priority task (`tCloud`), so a slow or missing network never delays the UART link or tamper detection.
 
 ## Testing without the MCU (loopback)
 

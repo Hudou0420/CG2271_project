@@ -74,7 +74,9 @@ tGame's ATTEMPT, SOLVED and ALARM packets on `xUartTxQueue` are sent with
 ACK/NAK and up to 3 resends. STATUS (state, dial digit, knocks, attempts,
 light level, encoder steps) goes out every second, and within ~100 ms of a change.
 
-The ESP32 firmware (PlatformIO) is in `esp32/`; see `esp32/README.md`.
+The ESP32 firmware (PlatformIO) is in `esp32/`; see `esp32/README.md`. It also
+connects to the web dashboard through Firebase; the database layout the dashboard
+should use (and `vault-api.js`, its JavaScript interface) is in `web/`.
 
 ## Recovery copy
 

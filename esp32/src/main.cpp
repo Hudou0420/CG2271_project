@@ -3,11 +3,11 @@
 // Tasks:
 //   tLink  (prio 3)  UART link to the MCXC444: parse, ACK/NAK, retransmit
 //   tImu   (prio 2)  MPU-6050 at 20 Hz -> TAMPER while armed
+//   tCloud (prio 1)  Wi-Fi + Firebase: status, events, dashboard commands
 //   loop() (prio 1)  debug console on the USB serial monitor
-//
-// Later: Wi-Fi, web dashboard, LLM and database tasks plug into on_message().
 #include <Arduino.h>
 
+#include "cloud.h"
 #include "config.h"
 #include "imu.h"
 #include "link.h"
@@ -102,11 +102,13 @@ static void on_message(const vp_frame_t &f)
                       link_type_name(f.type), f.len);
         break;
     }
+    cloud_on_message(f);
 }
 
 // Delivery report for our own messages (runs in tLink).
 static void on_delivered(uint8_t type, bool ok)
 {
+    cloud_on_delivered(type, ok);
     if (!ok) {
         return;
     }
@@ -133,6 +135,7 @@ static void print_help()
         "  raw                  toggle hex dump of UART bytes\n"
         "  sensors              toggle printing MCU sensor changes\n"
         "  stats                link counters and vault state\n"
+        "  cloud                Wi-Fi / Firebase status\n"
         "  help                 this list");
 }
 
@@ -160,6 +163,24 @@ static void print_stats()
                       r.devG, r.gyroDps);
     } else {
         Serial.println("imu: not ready");
+    }
+}
+
+static void print_cloud()
+{
+    CloudStats c = cloud_stats();
+
+    if (!c.configured) {
+        Serial.println("cloud: off (copy include/secrets.example.h to include/secrets.h)");
+        return;
+    }
+    Serial.printf("cloud: Wi-Fi %s, Firebase %s | requests ok %lu, failed %lu, "
+                  "last HTTP %d | commands %lu, events dropped %lu | free heap %lu\n",
+                  c.wifiUp ? "up" : "DOWN", c.signedIn ? "signed in" : "not signed in",
+                  c.requestsOk, c.requestsFailed, c.lastHttpCode, c.commandsHandled,
+                  c.eventsDropped, (unsigned long)ESP.getFreeHeap());
+    if (c.lastError[0] != '\0') {
+        Serial.printf("cloud: last error: %s\n", c.lastError);
     }
 }
 
@@ -223,6 +244,8 @@ static void handle_command(char *line)
         Serial.printf("MCU sensor printing %s\n", s_sensorPrint ? "on" : "off");
     } else if (strcmp(cmd, "stats") == 0) {
         print_stats();
+    } else if (strcmp(cmd, "cloud") == 0) {
+        print_cloud();
     } else if (strcmp(cmd, "help") == 0) {
         print_help();
     } else {
@@ -265,6 +288,7 @@ void setup()
     state_init();
     link_init(on_message, on_delivered);
     imu_init();
+    cloud_init();
 
     Serial.printf("MCU link: Serial1 %d baud, TX=GPIO%d RX=GPIO%d\n", VP_BAUD,
                   PIN_MCU_TX, PIN_MCU_RX);
