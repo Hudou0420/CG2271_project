@@ -1,0 +1,9 @@
+{
+  "name": "vault_protocol",
+  "version": "1.0.0",
+  "description": "MCXC444 <-> ESP32 UART protocol for The Vault (shared by both boards)",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "."
+  }
+}

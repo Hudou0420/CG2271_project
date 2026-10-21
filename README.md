@@ -7,7 +7,8 @@ The MCU project is now at this repository root. It combines remote main
 ## Open and build
 
 In MCUXpresso, use **Import > General > Existing Projects into Workspace**
-and select this repository's `code` directory. The imported project is named
+and select this repository's root directory (leave "Copy projects into
+workspace" unticked). The imported project is named
 **CG2271_Project**. Refresh/reload after importing if needed.
 The local MCU/compiler/board settings were reused; Debug and Release include
 `bsp/` as a source and include directory.
@@ -49,7 +50,7 @@ Edit **source/vault_sensor_config.h**. `VAULT_ENCODER_STEPS_PER_ROUND=40`
 is a provisional value, not a physical calibration. LDR ADC polling runs,
 but `VAULT_LDR_BEAM_DETECTION_ENABLED=0` until its threshold/polarity are
 measured. The existing game task logs incoming events. It remains IDLE until
-an ARM command is supplied; the UART and actuator tasks remain stubs.
+an ARM command arrives from the ESP32; the actuator task remains a stub.
 
 See [the sensor-service guide](source/README_sensors.md) for event semantics,
 round-boundary reversal examples, calibration, task ownership and diagnostics.
@@ -61,6 +62,19 @@ To run it in this project, exclude `source/CG2271_Project.c` from that build
 and compile a `.c` copy of the example as the sole main. Restore the remote
 entry point for normal game integration. The external backup also retains
 the original working bench-test build.
+
+## ESP32 link
+
+`tComms` is `source/vault_comms.c`: LPUART1 at 115200 baud on **PTE0 (J2-18,
+TX) -> ESP32 GPIO5** and **PTE1 (J2-20, RX) <- ESP32 GPIO4**, plus a common GND.
+The frame format and message types are shared with the ESP32 firmware in
+`common/vault_protocol/` (compiled into both builds). ARM, DISARM and TAMPER
+from the ESP32 become `EV_ARM`, `EV_DISARM` and `EV_TAMPER` on `xInputQueue`;
+tGame's ATTEMPT, SOLVED and ALARM packets on `xUartTxQueue` are sent with
+ACK/NAK and up to 3 resends. STATUS (state, dial digit, knocks, attempts,
+light level, encoder steps) goes out every second, and within ~100 ms of a change.
+
+The ESP32 firmware (PlatformIO) is in `esp32/`; see `esp32/README.md`.
 
 ## Recovery copy
 

@@ -5,7 +5,7 @@
  *   - tGame      : REAL (Person 1). Owns the FSM.
  *   - tInput     : sensor adapter; calibrated encoder rounds, taps, button
  *   - tTripwire  : polled LDR service; threshold gated by configuration
- *   - tComms     : STUB (Person 3 fills in)
+ *   - tComms     : REAL (Person 3). ESP32 UART link, see vault_comms.c
  *   - tActuator  : STUB (Person 2 fills in)
  *   - tSelfTest  : TEMPORARY. Injects fake events so you can watch the FSM
  *                  run on the board before anyone else's code exists.
@@ -26,6 +26,7 @@
 #include "bsp.h"
 
 #include "vault_rtos.h"
+#include "vault_comms.h"
 #include "vault_fsm.h"
 #include "vault_sensors.h"
 #include "vault_sensor_config.h"
@@ -143,23 +144,6 @@ static void tTripwire(void *p)
 #else
     vault_tripwire_task(p);
 #endif
-}
-
-/* ------------------------------------------------------------------ */
-/* tComms  (STUB - Person 3)                                           */
-/* Right now it just prints whatever tGame wants to send.              */
-/* ------------------------------------------------------------------ */
-static void tComms(void *p)
-{
-    TxMsg m;
-    while (1) {
-        if (xQueueReceive(xUartTxQueue, &m, portMAX_DELAY) == pdTRUE) {
-            PRINTF("[tComms stub] would send packet type 0x%02X, %d payload bytes\r\n",
-                   (unsigned)m.type, (int)m.len);
-        }
-        /* Person 3: also build/parse real packets, handle ACK/NAK, and post
-         * EV_ARM / EV_DISARM / EV_TAMPER into xInputQueue. */
-    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -285,9 +269,13 @@ int main(void)
         while (1) { }
     }
 #endif
+    if (!vault_comms_init()) {
+        PRINTF("ERROR: could not set up the ESP32 UART link.\r\n");
+        while (1) { }
+    }
     if (xTaskCreate(tTripwire, "tripwire", configMINIMAL_STACK_SIZE + 160, NULL, PRIO_TRIPWIRE, NULL) != pdPASS ||
         xTaskCreate(tGame, "game", configMINIMAL_STACK_SIZE + 150, NULL, PRIO_GAME, NULL) != pdPASS ||
-        xTaskCreate(tComms, "comms", configMINIMAL_STACK_SIZE + 100, NULL, PRIO_COMMS, NULL) != pdPASS ||
+        xTaskCreate(vault_comms_task, "comms", VAULT_COMMS_STACK_WORDS, NULL, PRIO_COMMS, NULL) != pdPASS ||
         xTaskCreate(tActuator, "actuator", configMINIMAL_STACK_SIZE + 100, NULL, PRIO_ACTUATOR, NULL) != pdPASS) {
         PRINTF("ERROR: could not create game tasks (check heap).\r\n");
         while (1) { }

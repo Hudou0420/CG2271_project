@@ -1,0 +1,82 @@
+# The Vault: ESP32 firmware
+
+Board: **ESP32-S2-DevKitM-1** (built with PlatformIO's `esp32-s2-saola-1` definition).
+
+This version implements the UART link to the MCXC444 and tamper detection with the MPU-6050.
+Wi-Fi, the dashboard and the cloud calls come later.
+
+## Wiring
+
+| ESP32-S2 pin | Goes to | Notes |
+|---|---|---|
+| GPIO4 (TX) | MCXC444 UART RX | |
+| GPIO5 (RX) | MCXC444 UART TX | |
+| GND | MCXC444 GND | **Required:** the boards must share a ground |
+| 3V3 | GY-521 VCC | |
+| GND | GY-521 GND | |
+| GPIO8 | GY-521 SDA | |
+| GPIO9 | GY-521 SCL | |
+
+You can change the pins in `include/config.h`. Avoid GPIO18, which drives the on-board RGB LED.
+
+Our GY-521 actually carries an **MPU-6500** (WHO_AM_I `0x70`), not a genuine MPU-6050 (`0x68`).
+Its accelerometer and gyro registers are the same, so `imu.cpp` drives the chip directly over I2C instead of using the Adafruit library, which rejects anything except `0x68`.
+
+## Build, flash, monitor
+
+`pio` lives at `~/.platformio/penv/bin/pio`. You can also use the PlatformIO buttons in VS Code.
+
+```sh
+pio run -t upload        # build and flash
+pio device monitor       # debug console, 115200 baud
+pio test -e native       # protocol unit tests on the laptop, no board needed
+```
+
+## Debug console
+
+Type commands into the serial monitor:
+
+```
+arm 427 [pattern]   send ARM (code 4-2-7, knock pattern 0 by default)
+disarm              send DISARM
+tamper              send TAMPER now
+send 10 04 02 07 01 03   send any frame: type, then payload bytes (hex)
+imu                 stream IMU samples (for tuning thresholds)
+raw                 hex-dump every UART byte
+sensors             toggle printing the MCU's sensor snapshot when it changes
+stats               link counters, vault state, MCU sensors, latest IMU sample
+```
+
+## Testing without the MCU (loopback)
+
+Connect **GPIO4 to GPIO5** with a jumper wire. The ESP32 then receives its own frames:
+
+- `arm 123` prints `received ARM`, the ESP32 ACKs its own frame, and then prints `ARM delivered`.
+- `send 13 01 00 00 00 00 00 00 00 00 00 00 00` makes the ESP32 receive a fake STATUS = LOCKED, so the vault counts as armed. Shaking the IMU then sends TAMPER.
+- `send 10 01 02 03 01 05` simulates an ATTEMPT from the MCU.
+- Remove the jumper and run `arm 123`: after 3 retries the console prints `not acknowledged`, which shows retransmission works.
+
+## Protocol
+
+The single source of truth is `../common/vault_protocol/vault_protocol.h`, which is plain C.
+The MCXC444 project should compile the same `vault_protocol.c` and `vault_protocol.h` so both sides use the same message IDs and parser.
+
+```
+| 0xAA | TYPE | LEN | PAYLOAD | CHK = TYPE ^ LEN ^ payload... |
+```
+
+| Type | ID | Direction | Payload |
+|---|---|---|---|
+| ARM | 0x01 | ESP → MCU | d0 d1 d2 pattern_id |
+| DISARM | 0x02 | ESP → MCU | none |
+| TAMPER | 0x03 | ESP → MCU | peak \|a\| in mg (u16 LE) |
+| ATTEMPT | 0x10 | MCU → ESP | d0 d1 d2 attempt_no closeness |
+| SOLVED | 0x11 | MCU → ESP | attempts, seconds (u16 LE) |
+| ALARM | 0x12 | MCU → ESP | cause (0 = beam, 1 = tamper) |
+| STATUS | 0x13 | MCU → ESP | 12 B: state (0 IDLE, 1 LOCKED, 2 DIALING, 3 UNLOCKED, 4 ALARM), digits entered, dial digit, knocks, attempts, closeness, light (u16 LE), encoder steps (i16 LE), sensor events, flags. See `VP_ST_*` |
+| ACK | 0x20 | both | echoed TYPE |
+| NAK | 0x21 | both | echoed TYPE |
+
+- Every good frame except ACK/NAK gets an ACK. A bad checksum, bad length or unknown type gets a NAK.
+- The sender keeps one message in flight. It resends on a NAK or after 100 ms without an ACK, up to 3 times.
+- The MCU sends STATUS once per second, and within ~100 ms when a sensor reading or the game progress changes. If none arrives for 3 s, the ESP32 shows the MCU as offline.
