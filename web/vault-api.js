@@ -1,181 +1,253 @@
-// vault-api.js - the web dashboard's interface to the vault.
-//
-// The dashboard never talks to the ESP32 directly: both sides use the same
-// Firebase Realtime Database (layout in README.md). This module hides those
-// paths, so the page only calls functions:
-//
-//   import { connectVault } from "./vault-api.js";
-//
-//   const vault = await connectVault(firebaseConfig);   // from the Firebase console
-//   vault.onStatus((s) => showState(s.state, s.espOnline));
-//   vault.onEvents((e) => addToLog(e));
-//   vault.onLeaderboard((rows) => showLeaderboard(rows));
-//
-//   const r = await vault.arm("427", { player: "Alice", onUpdate: showProgress });
-//   if (!r.ok) alert(r.result);
-//
-// Plain ES module: load the page with <script type="module"> from a web server
-// (e.g. `python3 -m http.server` in this folder), not by opening it as file://.
-// With npm + a bundler, change the three import URLs to "firebase/app",
-// "firebase/auth" and "firebase/database".
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+// The dashboard's only interface to Firebase. Passwords never enter the database.
+import { initializeApp, getApps } from "firebase/app";
+import {
+  getAuth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  setPersistence,
+  browserSessionPersistence,
+  connectAuthEmulator,
+} from "firebase/auth";
 import {
   getDatabase,
-  limitToFirst,
-  limitToLast,
-  onChildAdded,
   onValue,
-  orderByChild,
-  orderByKey,
-  push,
+  onChildAdded,
   query,
+  orderByKey,
+  orderByChild,
+  limitToLast,
   ref,
+  push,
   serverTimestamp,
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+  connectDatabaseEmulator,
+} from "firebase/database";
 
-const ROOT = "vault";
-
-/** The ESP32 rewrites status at least every 10 s; older than this = offline. */
 export const OFFLINE_AFTER_MS = 30000;
+export const STATES = [
+  "IDLE",
+  "LOCKED",
+  "DIALING",
+  "UNLOCKED",
+  "ALARM",
+  "UNKNOWN",
+];
 
-/** Values of status.state. */
-export const STATES = ["IDLE", "LOCKED", "DIALING", "UNLOCKED", "ALARM", "UNKNOWN"];
-
-/**
- * Sign in (anonymously) and return the vault interface.
- *
- * @param {object} config  Firebase web config ({ apiKey, authDomain, databaseURL,
- *                         projectId, ... }), or an app from initializeApp().
- *                         databaseURL is required for non-US databases.
- */
-export async function connectVault(config) {
-  const app = config && config.options && config.name ? config : initializeApp(config);
-  await signInAnonymously(getAuth(app)); // needs Anonymous sign-in enabled
+export async function connectVault(config, { emulator = false } = {}) {
+  const app =
+    config?.options && config?.name
+      ? config
+      : getApps()[0] || initializeApp(config);
+  const auth = getAuth(app);
   const db = getDatabase(app);
-
-  // Server clock minus ours, so "is the ESP32 online?" survives a wrong PC clock.
-  let serverOffset = 0;
-  onValue(ref(db, ".info/serverTimeOffset"), (snap) => {
-    serverOffset = snap.val() || 0;
-  });
-  const serverNow = () => Date.now() + serverOffset;
-
-  function withOnline(raw) {
-    if (!raw) {
-      return { state: "UNKNOWN", espOnline: false, mcuOnline: false, ageMs: null };
-    }
-    const ageMs = serverNow() - (raw.updatedAt || 0);
-    return { ...raw, espOnline: ageMs < OFFLINE_AFTER_MS, ageMs };
-  }
-
-  /**
-   * Live vault status. cb(status) runs on every change, and also when the
-   * ESP32 goes offline (no update for OFFLINE_AFTER_MS).
-   * status = { state, espOnline, mcuOnline, digitsEntered, dial, knocks,
-   *            attempts, closeness, light, lightValid, beamEnabled,
-   *            inputsReady, uptimeS, updatedAt, ageMs }
-   * Returns a function that stops listening.
-   */
-  function onStatus(cb) {
-    let raw = null;
-    let lastOnline = null;
-    const emit = () => {
-      const s = withOnline(raw);
-      lastOnline = s.espOnline;
-      cb(s);
-    };
-    const stop = onValue(ref(db, `${ROOT}/status`), (snap) => {
-      raw = snap.val();
-      emit();
+  if (emulator && !app.__vaultEmulators) {
+    connectAuthEmulator(auth, "http://127.0.0.1:9099", {
+      disableWarnings: true,
     });
-    const timer = setInterval(() => {
-      if (withOnline(raw).espOnline !== lastOnline) emit();
-    }, 5000);
+    connectDatabaseEmulator(db, "127.0.0.1", 9000);
+    app.__vaultEmulators = true;
+  }
+  await setPersistence(auth, browserSessionPersistence);
+  let offset = 0;
+  let connected = false;
+  const cleanup = [
+    onValue(ref(db, ".info/serverTimeOffset"), (snap) => {
+      offset = snap.val() || 0;
+    }),
+    onValue(ref(db, ".info/connected"), (snap) => {
+      connected = snap.val() === true;
+    }),
+  ];
+  const serverNow = () => Date.now() + offset;
+  let owner = false;
+
+  function onOwner(cb, onError = () => {}) {
+    let stopRole = () => {};
+    const stopAuth = onAuthStateChanged(
+      auth,
+      (user) => {
+        stopRole();
+        owner = false;
+        cb({ user, owner: false, checking: !!user });
+        if (user)
+          stopRole = onValue(
+            ref(db, `access/owners/${user.uid}`),
+            (snap) => {
+              owner = snap.val() === true;
+              cb({ user, owner, checking: false });
+            },
+            (error) => {
+              owner = false;
+              cb({ user, owner: false, checking: false });
+              onError(error);
+            },
+          );
+      },
+      onError,
+    );
+    return () => {
+      stopRole();
+      stopAuth();
+    };
+  }
+  function onStatus(cb, onError = () => {}) {
+    let raw = null;
+    const emit = () => {
+      const ageMs = raw
+        ? Math.max(0, serverNow() - (raw.updatedAt || 0))
+        : null;
+      cb(
+        raw
+          ? { ...raw, ageMs, espOnline: ageMs < OFFLINE_AFTER_MS }
+          : {
+              state: "UNKNOWN",
+              espOnline: false,
+              mcuOnline: false,
+              ageMs: null,
+            },
+      );
+    };
+    const stop = onValue(
+      ref(db, "vault/status"),
+      (snap) => {
+        raw = snap.val();
+        emit();
+      },
+      onError,
+    );
+    const timer = setInterval(emit, 1000);
     return () => {
       stop();
       clearInterval(timer);
     };
   }
-
-  /**
-   * Game events, oldest first: the last `limit` existing ones, then each new one.
-   * cb(event), event = { id, type, at, ...fields }, type is one of
-   * armed, disarmed, attempt, solved, alarm, mcu_online, mcu_offline.
-   * Returns a function that stops listening.
-   */
-  function onEvents(cb, { limit = 50 } = {}) {
-    const q = query(ref(db, `${ROOT}/events`), orderByKey(), limitToLast(limit));
-    return onChildAdded(q, (snap) => cb({ id: snap.key, ...snap.val() }));
+  function onEvents(cb, { limit = 100, onError = () => {} } = {}) {
+    return onChildAdded(
+      query(ref(db, "vault/events"), orderByKey(), limitToLast(limit)),
+      (snap) => cb({ id: snap.key, ...snap.val() }),
+      onError,
+    );
   }
-
-  /**
-   * Fastest solves. cb(rows) with rows sorted by seconds, then attempts:
-   * [{ id, player, attempts, seconds, at }, ...]. Runs again on every new solve.
-   * Returns a function that stops listening.
-   */
-  function onLeaderboard(cb, { limit = 10 } = {}) {
-    const q = query(ref(db, `${ROOT}/leaderboard`), orderByChild("seconds"), limitToFirst(limit));
-    return onValue(q, (snap) => {
-      const rows = [];
-      snap.forEach((child) => {
-        rows.push({ id: child.key, ...child.val() });
-      });
-      rows.sort((a, b) => a.seconds - b.seconds || a.attempts - b.attempts);
-      cb(rows);
-    });
+  // Snapshot subscription marks the initial history as a single batch, so it
+  // cannot replay celebrations/sounds when a spectator opens the page.
+  function onEventHistory(cb, onError = () => {}) {
+    return onValue(
+      query(ref(db, "vault/events"), orderByKey(), limitToLast(200)),
+      (snap) => {
+        const events = [];
+        snap.forEach((child) => {
+          events.push({ id: child.key, ...child.val() });
+        });
+        cb(events);
+      },
+      onError,
+    );
   }
-
-  // Push a command and wait for the ESP32's verdict in commandResults.
-  function sendCommand(command, { onUpdate, timeoutMs = 10000 } = {}) {
+  function onLeaderboard(cb, { limit = 100, onError = () => {} } = {}) {
+    return onValue(
+      query(ref(db, "vault/leaderboard"), orderByChild("seconds")),
+      (snap) => {
+        const rows = [];
+        snap.forEach((child) => {
+          rows.push({ id: child.key, ...child.val() });
+        });
+        rows.sort(
+          (a, b) =>
+            a.seconds - b.seconds || a.attempts - b.attempts || a.at - b.at,
+        );
+        cb(rows.slice(0, limit));
+      },
+      onError,
+    );
+  }
+  async function sendCommand(command, { onUpdate, timeoutMs = 10000 } = {}) {
+    if (!owner || !auth.currentUser)
+      throw new Error("Sign in with the owner account to control the vault.");
+    if (!connected) throw new Error("The database connection is offline.");
     return new Promise((resolve, reject) => {
-      push(ref(db, `${ROOT}/commands`), { ...command, at: serverTimestamp() })
+      let done = false,
+        stop = () => {},
+        id = null;
+      const finish = (result) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        stop();
+        resolve({ ok: result === "delivered", result, id });
+      };
+      // Includes the database write and acknowledgement. Never auto-resend.
+      const timer = setTimeout(
+        () =>
+          finish(
+            "timeout: the vault did not answer; check its state before trying again",
+          ),
+        timeoutMs,
+      );
+      push(ref(db, "vault/commands"), { ...command, at: serverTimestamp() })
         .then((cmdRef) => {
-          let done = false;
-          let stop = null;
-          const finish = (result) => {
-            if (done) return;
+          id = cmdRef.key;
+          if (done) return;
+          stop = onValue(
+            ref(db, `vault/commandResults/${cmdRef.key}`),
+            (snap) => {
+              const result = snap.val()?.result;
+              if (!result || done) return;
+              onUpdate?.(result);
+              if (result !== "sent") finish(result);
+            },
+            (error) => {
+              if (!done) {
+                done = true;
+                clearTimeout(timer);
+                stop();
+                reject(error);
+              }
+            },
+          );
+          if (done) stop();
+        })
+        .catch((error) => {
+          if (!done) {
             done = true;
             clearTimeout(timer);
-            if (stop) stop();
-            resolve({ ok: result === "delivered", result, id: cmdRef.key });
-          };
-          const timer = setTimeout(
-            () => finish("timeout: no answer from the vault (is the ESP32 online?)"),
-            timeoutMs,
-          );
-          stop = onValue(ref(db, `${ROOT}/commandResults/${cmdRef.key}`), (snap) => {
-            const res = snap.val();
-            if (!res || done) return;
-            if (onUpdate) onUpdate(res.result);
-            if (res.result !== "sent") finish(res.result);
-          });
-          if (done) stop(); // answered before onValue() returned
-        })
-        .catch(reject);
+            stop();
+            reject(error);
+          }
+        });
     });
   }
 
-  /**
-   * Arm the vault with a 3-digit code. Resolves with { ok, result, id }:
-   * ok is true once the MCU acknowledged it ("delivered"); otherwise result
-   * explains why (see README.md). onUpdate(result) also sees "sent" first.
-   * Delivered is not the same as accepted: watch onStatus for LOCKED.
-   */
-  function arm(code, { player = "anonymous", pattern, onUpdate, timeoutMs } = {}) {
-    const digits = typeof code === "number" ? String(code).padStart(3, "0") : String(code).trim();
-    if (!/^\d{3}$/.test(digits)) {
-      return Promise.resolve({ ok: false, result: "rejected: code must be 3 digits", id: null });
-    }
-    const command = { action: "arm", code: digits, player: String(player).slice(0, 24) };
+  function arm(code, { player = "anonymous", pattern, ...options } = {}) {
+    const digits =
+      typeof code === "number"
+        ? String(code).padStart(3, "0")
+        : String(code).trim();
+    if (!/^\d{3}$/.test(digits))
+      return Promise.resolve({
+        ok: false,
+        result: "Enter exactly three digits.",
+        id: null,
+      });
+    const command = {
+      action: "arm",
+      code: digits,
+      player: String(player).trim().slice(0, 24) || "anonymous",
+    };
     if (pattern !== undefined) command.pattern = pattern;
-    return sendCommand(command, { onUpdate, timeoutMs });
+    return sendCommand(command, options);
   }
-
-  /** Disarm (back to IDLE). Same result as arm(). Ignored by the MCU during ALARM. */
-  function disarm({ onUpdate, timeoutMs } = {}) {
-    return sendCommand({ action: "disarm" }, { onUpdate, timeoutMs });
-  }
-
-  return { onStatus, onEvents, onLeaderboard, arm, disarm, db };
+  return {
+    onStatus,
+    onEvents,
+    onEventHistory,
+    onLeaderboard,
+    onOwner,
+    serverNow,
+    arm,
+    disarm: (options) => sendCommand({ action: "disarm" }, options),
+    signIn: (email, password) =>
+      signInWithEmailAndPassword(auth, email, password),
+    signOut: () => signOut(auth),
+    destroy: () => cleanup.forEach((stop) => stop()),
+  };
 }

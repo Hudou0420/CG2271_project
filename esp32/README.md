@@ -52,12 +52,12 @@ cloud               Wi-Fi / Firebase status, request counters, last error
 ## Web dashboard link (Firebase)
 
 1. Set up the Firebase project once, as described in [web/README.md](../web/README.md#firebase-project-setup-once).
-2. Copy `include/secrets.example.h` to `include/secrets.h` and fill in the Wi-Fi name and password, the database URL and the Web API key.
+2. Copy `include/secrets.example.h` to `../Project_Secrets/secrets.h` relative to the repository root and fill in Wi-Fi, database URL, Web API key, and the dedicated device account credentials. See `web/README.md` for the owner/device UID migration before publishing protected rules.
    `secrets.h` is in `.gitignore`: never commit it or put it in the submission zip. Without it the firmware still builds, with the cloud link off.
 3. Flash and open the monitor. Within a few seconds you should see `Wi-Fi connected`, `signed in to Firebase` and `connected to the database`.
    `cloud` shows the counters and the last error if something fails.
 
-Until the real dashboard exists, `tools/dashboard_sim.py` plays its part, using the same database paths (standard-library Python, reads `secrets.h`):
+The production dashboard is in `web/`. `tools/dashboard_sim.py` remains a command-line alternative using the same paths (standard-library Python, reads the external `Project_Secrets/secrets.h`). Public watch/status commands need no login after the protected rules are published; arm/disarm prompt for the shared owner email and password:
 
 ```sh
 python3 tools/dashboard_sim.py watch                   # live status + new events

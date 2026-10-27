@@ -3,8 +3,8 @@
 
 Uses the same database paths as the real dashboard will (see web/README.md),
 so it tests the ESP32's cloud link before the dashboard exists. Reads
-FIREBASE_DB_URL and FIREBASE_API_KEY from ../include/secrets.h. Standard
-library only.
+FIREBASE_DB_URL and FIREBASE_API_KEY from Project_Secrets/secrets.h beside
+the repository root. Standard library only.
 
     python3 dashboard_sim.py status              current /vault/status
     python3 dashboard_sim.py watch               follow status and new events
@@ -14,16 +14,18 @@ library only.
     python3 dashboard_sim.py leaderboard         fastest solves
 """
 import argparse
+import getpass
 import json
 import pathlib
 import re
+import ssl
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-SECRETS = pathlib.Path(__file__).resolve().parent.parent / "include" / "secrets.h"
+SECRETS = pathlib.Path(__file__).resolve().parents[3] / "Project_Secrets" / "secrets.h"
 ROOT = "/vault"
 
 
@@ -31,7 +33,7 @@ def load_config():
     try:
         text = SECRETS.read_text()
     except FileNotFoundError:
-        sys.exit(f"{SECRETS} not found: copy secrets.example.h to secrets.h and fill it in")
+        sys.exit(f"{SECRETS} not found: place your configured secrets.h in Project_Secrets beside the repository root")
 
     def get(name):
         m = re.search(r'#define\s+%s\s+"([^"]*)"' % name, text)
@@ -51,25 +53,37 @@ def http_json(method, url, body=None, form=False):
     else:
         data, ctype = json.dumps(body).encode(), "application/json"
     req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": ctype})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read()
-    except urllib.error.HTTPError as e:
-        sys.exit(f"{method} {url.split('?')[0]}: HTTP {e.code} {e.read().decode()[:200]}")
-    except urllib.error.URLError as e:
-        sys.exit(f"{method} {url.split('?')[0]}: {e.reason}")
-    return json.loads(raw) if raw else None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw = resp.read()
+            return json.loads(raw) if raw else None
+        except urllib.error.HTTPError as e:
+            if method == "GET" and e.code >= 500 and attempt < 2:
+                time.sleep(attempt + 1)
+                continue
+            sys.exit(f"{method} {url.split('?')[0]}: HTTP {e.code}")
+        except (urllib.error.URLError, ssl.SSLError, OSError) as e:
+            if method == "GET" and attempt < 2:
+                print("Connection interrupted; retrying read...", file=sys.stderr)
+                time.sleep(attempt + 1)
+                continue
+            reason = e.reason if isinstance(e, urllib.error.URLError) else str(e)
+            sys.exit(f"{method} {url.split('?')[0]}: {reason}")
 
 
 class Db:
-    def __init__(self, url, api_key):
+    def __init__(self, url, api_key, owner_email=None):
         self.url = url
         self.token = None
-        if api_key:  # anonymous sign-in, like the ESP32 and the dashboard
+        if owner_email:
+            if not api_key:
+                sys.exit("FIREBASE_API_KEY is required for owner sign-in")
+            password = getpass.getpass("Owner password (not stored): ")
             reply = http_json(
                 "POST",
-                "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" + api_key,
-                {"returnSecureToken": True},
+                "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + api_key,
+                {"email": owner_email, "password": password, "returnSecureToken": True},
             )
             self.token = reply["idToken"]
 
@@ -189,10 +203,16 @@ def main():
     arm.add_argument("--player", default="anonymous")
     arm.add_argument("--pattern", type=int)
     arm.set_defaults(fn=cmd_arm)
+    p.add_argument("--owner-email", help="shared owner account email (password is prompted, never stored)")
     args = p.parse_args()
 
-    db = Db(*load_config())
+    email = None
+    if args.cmd in ("arm", "disarm"):
+        email = args.owner_email or input("Owner email: ").strip()
+        if not email:
+            p.error("owner email is required for commands")
     try:
+        db = Db(*load_config(), owner_email=email)
         args.fn(db, args)
     except KeyboardInterrupt:
         pass

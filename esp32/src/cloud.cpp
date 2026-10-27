@@ -28,6 +28,15 @@
 #define CLOUD_CONFIGURED 0
 #endif
 
+// Keep existing local configurations working until the device-account
+// migration is complete. Production rules require a dedicated device UID.
+#ifndef FIREBASE_DEVICE_EMAIL
+#define FIREBASE_DEVICE_EMAIL ""
+#endif
+#ifndef FIREBASE_DEVICE_PASSWORD
+#define FIREBASE_DEVICE_PASSWORD ""
+#endif
+
 // ---- Queue items (from the link task) ----------------------------------------
 
 enum ItemKind : uint8_t {
@@ -191,9 +200,23 @@ static bool ensure_signed_in()
     bool         fresh = s_refreshToken.length() == 0;
 
     if (fresh) {
-        if (!auth_post(String("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=") +
-                           FIREBASE_API_KEY,
-                       "application/json", "{\"returnSecureToken\":true}", doc)) {
+        const bool deviceAccount = strlen(FIREBASE_DEVICE_EMAIL) > 0;
+        if (deviceAccount && strlen(FIREBASE_DEVICE_PASSWORD) == 0) {
+            set_error("device account password is missing");
+            return false;
+        }
+        JsonDocument credentials;
+        credentials["returnSecureToken"] = true;
+        if (deviceAccount) {
+            credentials["email"] = FIREBASE_DEVICE_EMAIL;
+            credentials["password"] = FIREBASE_DEVICE_PASSWORD;
+        }
+        String body;
+        serializeJson(credentials, body);
+        const char *operation = deviceAccount ? "signInWithPassword" : "signUp";
+        if (!auth_post(String("https://identitytoolkit.googleapis.com/v1/accounts:") +
+                           operation + "?key=" + FIREBASE_API_KEY,
+                       "application/json", body, doc)) {
             return false;
         }
         idToken = doc["idToken"] | "";
@@ -216,7 +239,9 @@ static bool ensure_signed_in()
     s_refreshToken   = refresh;
     s_tokenExpiresMs = millis() + (uint32_t)atoi(expires) * 1000U;
     if (fresh) {
-        Serial.println("[cloud] signed in to Firebase (anonymous)");
+        Serial.println(strlen(FIREBASE_DEVICE_EMAIL) > 0
+                           ? "[cloud] signed in to Firebase (device account)"
+                           : "[cloud] signed in anonymously; migrate before publishing protected rules");
     }
     bool signedIn = s_idToken.length() > 0;
     taskENTER_CRITICAL(&s_mux);

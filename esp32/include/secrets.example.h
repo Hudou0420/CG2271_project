@@ -1,4 +1,4 @@
-// secrets.example.h - copy this file to secrets.h (same folder) and fill it in.
+// Copy to ../../Project_Secrets/secrets.h relative to esp32/, outside the repo.
 //
 // secrets.h is in .gitignore: never commit it or put it in the submission zip.
 // Without secrets.h the firmware still builds and runs, with the cloud link off.
@@ -12,7 +12,12 @@
 #define FIREBASE_DB_URL "https://your-project-default-rtdb.asia-southeast1.firebasedatabase.app"
 
 // Firebase console -> Project settings -> General -> Web API key.
-// The ESP32 signs in anonymously with it (enable Authentication -> Sign-in
-// method -> Anonymous). Leave it "" only if the database rules allow access
-// without signing in (test mode).
+// Enable Email/Password authentication. Use a separate device account;
+// never use the shared dashboard owner account for the ESP32.
 #define FIREBASE_API_KEY ""
+
+// Create the device user in Firebase Authentication and grant its UID access
+// under /access/devices/<uid> = true before publishing protected rules.
+// Keep these credentials in the external secrets.h, never in browser config.
+#define FIREBASE_DEVICE_EMAIL ""
+#define FIREBASE_DEVICE_PASSWORD ""

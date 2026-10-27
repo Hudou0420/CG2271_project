@@ -1,197 +1,204 @@
-# The Vault: web dashboard ↔ ESP32 interface
+# The Vault dashboard
 
-**Dashboard developers: use [`vault-api.js`](vault-api.js).** It is the whole
-interface to the vault. You never deal with the ESP32, the UART link or the
-database paths yourself.
+A public live game screen with an animated mechanical vault, round progress,
+recent guesses, rankings, and a protected owner panel. React + TypeScript + Vite,
+using Firebase Realtime Database through `vault-api.js`.
 
-```html
-<script type="module">
-  import { connectVault } from "./vault-api.js";
+## Run it
 
-  const vault = await connectVault({          // your Firebase web config
-    apiKey: "...", authDomain: "...", projectId: "...",
-    databaseURL: "https://<project>-default-rtdb.asia-southeast1.firebasedatabase.app",
-  });
+From `Project/web/`:
 
-  vault.onStatus((s) => {                     // live, on every change
-    // s.state: IDLE | LOCKED | DIALING | UNLOCKED | ALARM | UNKNOWN
-    // s.espOnline: false if the vault has gone quiet for 30 s
-    // s.dial, s.digitsEntered, s.knocks, s.attempts, s.closeness (0-100), ...
-  });
-  vault.onEvents((e) => { /* e.type: armed, attempt, solved, alarm, ... */ });
-  vault.onLeaderboard((rows) => { /* [{ player, seconds, attempts }, ...] fastest first */ });
-
-  const r = await vault.arm("427", { player: "Alice", onUpdate: (step) => console.log(step) });
-  // r.ok: the MCU received it; otherwise r.result says why ("rejected: MCU offline", ...)
-  await vault.disarm();
-</script>
+```sh
+npm ci
+npm run dev
 ```
 
-| Function | What it does |
-|---|---|
-| `connectVault(config)` | Signs in (anonymously) and returns the interface. Pass the Firebase web config, or an app you already created with `initializeApp()`. |
-| `onStatus(cb)` | `cb(status)` on every change, and when the vault goes offline. Fields are in [`/vault/status`](#vaultstatus-esp32-writes-dashboard-reads) below, plus `espOnline` and `ageMs`. |
-| `onEvents(cb, { limit })` | The last `limit` (default 50) events oldest first, then each new one. See [`/vault/events`](#vaulteventsid-esp32-appends-dashboard-reads). |
-| `onLeaderboard(cb, { limit })` | The `limit` (default 10) fastest solves, re-sent on every new solve. |
-| `arm(code, { player, pattern, onUpdate, timeoutMs })` | Arms with a 3-digit code (`"042"` or `42`). Resolves with `{ ok, result, id }` once the vault answers, or with a timeout after 10 s. |
-| `disarm({ onUpdate, timeoutMs })` | Back to IDLE. Same result as `arm`. |
+Open the URL printed by Vite. For a phone on the same network, use the laptop's
+LAN address and the same port. `npm run dev` binds to the network interface;
+allow that port through the laptop firewall if needed.
 
-Every `on…` function returns a function that stops listening. ES modules have
-to be served over HTTP, so test with `python3 -m http.server` in your folder,
-not by opening the file directly. With npm and a bundler, change the three
-`import` URLs at the top of `vault-api.js` to `"firebase/app"`,
-`"firebase/auth"` and `"firebase/database"`.
+Open `http://localhost:5173/?preview=1` to review the design without Firebase or
+hardware. Its scene selector covers IDLE, LOCKED, DIALING, UNLOCKED, ALARM and
+UNKNOWN. Preview records are labelled sample data and never sent to Firebase.
 
-`ok: true` means the MCU *received* the command. The game still decides
-whether it takes effect: for example, `arm` and `disarm` are ignored during an
-ALARM lockout. Show the state from `onStatus` rather than assuming.
+The real page has empty rankings until actual scores arrive. Preview is not a
+substitute for validating a physical round.
 
-## How it works
+## Public Firebase configuration
 
-The dashboard and the ESP32 never talk directly. Both read and write the same
-**Firebase Realtime Database**, under `/vault`:
+Copy `.env.example` to `.env.local` and fill the four `VITE_FIREBASE_*` fields
+from Firebase Project settings → your Web app. Restart Vite after changing it.
+These fields are intentionally public browser configuration. Never place owner,
+device or Wi-Fi passwords, or a service-account private key, in `VITE_*` values.
 
-```
- Web dashboard  ──writes──►  /vault/commands         ──polled by──►  ESP32 ──UART──► MCU
- (any browser)  ◄──reads───  /vault/status            ◄──written by──  ESP32
-                ◄──reads───  /vault/events            ◄──appended by──
-                ◄──reads───  /vault/leaderboard       ◄──appended by──
-                ◄──reads───  /vault/commandResults    ◄──written by──
-```
+Alternatively, use **Connection** at the bottom of the dashboard and paste a
+JSON object containing `apiKey`, `authDomain`, `databaseURL`, and `projectId`.
+Only those fields are retained in local browser storage. The hosted production
+build should supply the configuration through `.env.local` at build time so
+visitors do not need to configure their own browsers.
 
-The ESP32 side is `esp32/src/cloud.cpp`. `esp32/tools/dashboard_sim.py` uses
-the same paths from the command line, which is handy for testing without a page.
-The rest of this file is the database layout that `vault-api.js` wraps. You
-only need it if you change the interface or read the database some other way.
+External `Project_Secrets/secrets.h` is used only by firmware and the CLI
+simulator. The web app never imports it or needs access to it.
 
-## `/vault/status` (ESP32 writes, dashboard reads)
+## Migrate from the original demo rules
 
-Overwritten within about 1 s of any change, and at least every 10 s.
+Do this in order so the existing ESP32 connection keeps working during setup.
+Do not publish the protected rules while the board still relies on anonymous
+sign-in. No rules or Hosting configuration are published by local builds.
 
-```json
-{
-  "state": "DIALING",
-  "mcuOnline": true,
-  "digitsEntered": 1,
-  "dial": 7,
-  "knocks": 0,
-  "attempts": 2,
-  "closeness": 85,
-  "light": 2011,
-  "lightValid": true,
-  "beamEnabled": false,
-  "inputsReady": true,
-  "uptimeS": 734,
-  "updatedAt": 1792577312345
-}
-```
-
-| Field | Meaning |
-|---|---|
-| `state` | `IDLE`, `LOCKED` (armed, waiting for the knock), `DIALING` (knock accepted), `UNLOCKED` (cracked), `ALARM` (30 s lockout), or `UNKNOWN` (no word from the MCU yet) |
-| `mcuOnline` | `false` if the MCU has stopped answering the ESP32. The other fields are then stale. |
-| `digitsEntered`, `dial` | While DIALING: how many digits are confirmed (0–2), and the digit currently on the dial (0–9) |
-| `knocks` | Knocks counted so far towards the secret rhythm (while LOCKED) |
-| `attempts`, `closeness` | Guesses since arming, and how close the last one was (0–100, 100 = exact). Use it for a hot/cold hint. |
-| `light`, `lightValid`, `beamEnabled` | Raw tripwire light level (0–4095); whether it is a real reading; whether beam-break detection is switched on |
-| `inputsReady` | The tap sensor and dial are working |
-| `updatedAt` | Server time in ms since 1970. **If it is more than ~30 s old, show the vault as offline**: the ESP32 has lost Wi-Fi or power. |
-
-The secret code is never written to the database.
-
-## `/vault/events/<id>` (ESP32 appends, dashboard reads)
-
-A log, oldest first by key. Every event has `type` and `at` (server time, ms).
-
-| `type` | Extra fields | When |
-|---|---|---|
-| `armed` | `player` | An ARM reached the MCU (from the dashboard or the ESP32 console) |
-| `disarmed` | | A DISARM reached the MCU |
-| `attempt` | `guess` ("428"), `attempt` (1, 2, …), `closeness` (0–100) | A wrong 3-digit guess |
-| `solved` | `player`, `attempts`, `seconds` | The vault was cracked |
-| `alarm` | `cause` (`"beam"` or `"tamper"`) | Beam broken or box shaken while armed. A 30 s lockout follows. |
-| `mcu_online` / `mcu_offline` | | The MCU link came up or went down |
-
-These are the events the LLM game master should react to (`attempt`, `alarm`, `solved`).
-
-## `/vault/leaderboard/<id>` (ESP32 appends, dashboard reads)
-
-```json
-{ "player": "Alice", "attempts": 3, "seconds": 74, "at": 1792577312345 }
-```
-
-One entry per solve. Sort by `seconds` (then `attempts`) on the dashboard, or
-with `orderByChild("seconds")`, which needs the `.indexOn` rule below.
-
-## `/vault/commands/<id>` (dashboard writes, ESP32 consumes)
-
-Push a new child for each command, so two quick clicks are both kept:
-
-```json
-{ "action": "arm", "code": "427", "player": "Alice", "at": {".sv": "timestamp"} }
-{ "action": "disarm", "at": {".sv": "timestamp"} }
-```
-
-| Field | Notes |
-|---|---|
-| `action` | `"arm"` or `"disarm"` |
-| `code` | `arm` only: 3 digits, as a string `"042"` or a number `42` |
-| `player` | `arm` only, optional: name shown on the leaderboard if this round is solved (max 24 characters, default `"anonymous"`) |
-| `pattern` | `arm` only, optional: knock-pattern number (0–255). Currently ignored by the MCU, which has one fixed rhythm. |
-
-The ESP32 checks for commands once a second and handles them oldest first. It
-sends each one to the MCU once, then **deletes it**. Commands written while the
-ESP32 was off are deleted unhandled when it next connects. That stops a
-stale `arm` from firing hours later.
-
-## `/vault/commandResults/<id>` (ESP32 writes, dashboard reads)
-
-Same `<id>` as the command. Watch it to show feedback for a button press:
-
-```json
-{ "action": "arm", "result": "delivered", "at": 1792577312345 }
-```
-
-`result` goes from `"sent"` (handed to the UART link) to `"delivered"` (the MCU
-acknowledged it), or ends with one of:
-
-- `"failed: MCU did not acknowledge"`
-- `"rejected: MCU offline"`
-- `"rejected: code must be 3 digits"`
-- `"rejected: unknown action"`
-- `"rejected: link busy"`
-
-`delivered` means the MCU received the command. The game still decides: an
-`arm` during an ALARM lockout, or a `disarm` during ALARM, is ignored by the
-MCU. `/vault/status` shows the state that actually took effect.
-
-## Firebase project setup (once)
-
-1. Create a Firebase project, then **Build → Realtime Database → Create database**.
-   Pick the Singapore region (`asia-southeast1`) and start in *locked mode*.
-2. **Build → Authentication → Sign-in method → Anonymous → Enable.** The ESP32
-   signs in anonymously. The dashboard should too, with
-   `signInAnonymously(auth)` from the Firebase JS SDK.
-3. **Realtime Database → Rules**, then paste and publish:
+1. Enable **Email/Password** under Firebase Authentication → Sign-in method.
+2. Under Authentication → Users, manually create two different accounts:
+   - One shared owner account for the project team.
+   - One dedicated device account for the ESP32.
+   Use different passwords. The web app has no public registration flow.
+3. Copy each user's UID. In Realtime Database → Data, add these entries at the
+   root, alongside the existing `vault` node. Use actual UIDs in place of the
+   example names; preserve all existing game data:
 
    ```json
    {
-     "rules": {
-       "vault": {
-         ".read": "auth != null",
-         ".write": "auth != null",
-         "leaderboard": { ".indexOn": ["seconds"] }
-       }
+     "access": {
+       "owners": { "OWNER_UID": true },
+       "devices": { "DEVICE_UID": true }
      }
    }
    ```
 
-4. Copy the **database URL** (top of the Data tab) and the **Web API key**
-   (Project settings → General) into `esp32/include/secrets.h`. For the
-   dashboard, **Project settings → General → Your apps → Add app → Web** gives
-   the `firebaseConfig` object to pass to `connectVault()`. Add `databaseURL` if
-   it's missing.
+4. In the external `../Project_Secrets/secrets.h` relative to `Project/`, add:
 
-These rules let anyone signed in, including anonymous users, read and write
-`/vault`. That's fine for a class demo, but a public page would need stricter
-rules (for example, only the ESP32's user may write `status` and `events`).
+   ```cpp
+   #define FIREBASE_DEVICE_EMAIL "your-device-account-email"
+   #define FIREBASE_DEVICE_PASSWORD "your-device-account-password"
+   ```
+
+   Keep the existing Wi-Fi settings, `FIREBASE_API_KEY` and database URL. Never
+   use the owner credentials as the device credentials.
+5. Rebuild/upload from `Project/esp32/`:
+
+   ```sh
+   pio run -e esp32s2 -t upload
+   pio device monitor -b 115200
+   ```
+
+   Verify `signed in to Firebase (device account)` and continuing status
+   updates. Missing device fields retain legacy anonymous sign-in for migration
+   only; the protected rules will reject that identity.
+6. Review `database.rules.json`, then publish it in Realtime Database → Rules,
+   or deploy it with the Firebase CLI as described below. These rules replace
+   the broad demo permissions. Do not retain a parent `auth != null` grant:
+   parent grants would bypass the restrictions on private children.
+7. Open the dashboard and verify public viewing. Open **Owner access** and
+   sign in with the shared owner account. Its UID must be in `access/owners`.
+   Sign-in uses tab/session persistence; passwords are not saved by this app.
+8. Verify owner arm/disarm, status changes and alarms. Check the owner panel's
+   diagnostics for disabled beam detection or an unavailable input service.
+
+Anonymous sign-in is no longer needed by the dashboard, device or simulator
+once migration is complete. It can be disabled after verification. Public
+viewers read only public game data; they cannot read queued codes, send
+commands, write results, or grant themselves owner access. The Firebase
+Console remains the administrative place to manage roles.
+
+## Controls and timing
+
+The owner can enter or generate a code (000–999), set a player name, arm, and
+disarm. A secret is masked by default, cleared after submission, and never
+persisted by the page. Confirmed guess digits are masked on the shared screen;
+submitted wrong guesses are visible as attempt history. Ranking uses MCU solve
+seconds, then attempt count, then event time for stable ordering.
+
+Controls are disabled during dialing, lockout, disconnected links, and pending
+commands. Replacing a LOCKED round requires an explicit checkbox. Delivery
+acknowledgement means the packet arrived; the page waits for a subsequent
+matching MCU status before reporting success. Existing firmware does not echo
+a command ID in STATUS, so this is observed state confirmation rather than
+transaction-level proof of acceptance.
+
+Elapsed and lockout timers use server-timestamped armed/alarm events, corrected
+with Firebase's server clock offset. They are approximate: cloud delivery adds
+latency. If history has no start, the timer displays unavailable. A zero lockout
+countdown does not re-enable controls: MCU state must leave ALARM. Solve time
+comes directly from the MCU. If the ESP32 reboots during a round, the firmware's
+existing player association may reset to `console`; there is no durable round
+ID in the current protocol.
+
+The vault bubble currently shows short state guidance. Real LLM hints are a
+separate phase. Sound starts muted. Reduced-motion preferences disable motion.
+
+## Hosting
+
+From `Project/web/`, after configuring and verifying the accounts/device:
+
+```sh
+npx firebase login
+npm run build
+npx firebase deploy --project YOUR_PROJECT_ID --only hosting,database
+```
+
+The build outputs `dist/`. `firebase.json` deploys it as a single-page site
+with HTTPS, security headers, and long-lived asset caching. Use the explicit
+project ID to avoid selecting the wrong Firebase project. Add the deployed
+host to Authentication → Settings → Authorized domains if needed. For local
+sign-in, add `localhost` to that list if Firebase rejects it.
+
+Review the build and rules before running deploy. There is no automatic deploy
+hook. For a Hosting-only visual update after migration:
+
+```sh
+npm run build
+npx firebase deploy --project YOUR_PROJECT_ID --only hosting
+```
+
+## Validation
+
+```sh
+npm run build
+npm test
+npx playwright install chromium
+npm run test:browser
+npm run test:rules
+npm run test:live
+```
+
+Database/auth emulator checks require Java 21+ and use only `demo-vault` on
+loopback. Rules tests cover public reads, private command data, owner-only
+commands, malformed requests, protected results, device publishing and roles.
+Live browser tests cover owner sign-in, leading-zero codes, command rejection,
+state confirmation, session reload, stale status, and historical solve display.
+UI tests cover all states, phone layout, dialogs, muted sound and reduced motion.
+
+Use `VITE_USE_EMULATORS=true` only with `npm run dev` for a manually seeded local
+emulator. Production builds ignore this flag and never connect to emulators.
+No physical sensor is simulated by changing Firebase status. Hardware acceptance
+still needs the tap sensor fixed, then a wrong guess, solve and leaderboard write.
+
+## Interface and database paths
+
+`connectVault(publicConfig)` returns public subscriptions and owner operations:
+
+| Method | Behaviour |
+| --- | --- |
+| `onStatus(cb, onError)` | State, dial, digit progress, sensor snapshot and online flags; refreshes staleness every second |
+| `onEvents(cb, options)` | Incremental recent events, retaining the original helper contract |
+| `onEventHistory(cb, onError)` | Snapshot of the last 200 events for round recovery without replaying effects |
+| `onLeaderboard(cb, options)` | Fastest solves, sorted by time and attempts; dashboard limit 100 |
+| `onOwner(cb, onError)` | Session identity, role lookup and checking state |
+| `signIn(email, password)` / `signOut()` | Shared owner email/password session |
+| `arm(code, options)` / `disarm(options)` | Owner-only command submission; existing payloads unchanged |
+| `serverNow()` | Estimated Firebase server time |
+| `destroy()` | Stops the connection's clock subscription; stop each UI subscription separately |
+
+Existing `/vault` paths remain:
+
+- `status`: public live snapshot, written only by the device.
+- `events/<id>`: public armed, disarmed, attempt, solved, alarm and link events.
+- `leaderboard/<id>`: public `{player, seconds, attempts, at}` scores.
+- `commands/<id>`: private `{action, code?, player?, pattern?, at}` queue;
+  owners create entries, the device consumes/deletes them.
+- `commandResults/<id>`: private `{result, action?, at}` acknowledgements,
+  written by the device and readable by the owner.
+
+Player names and historical submitted guesses are public on this shared game
+screen. The current secret code is private in the pending command queue and is
+removed when the ESP32 consumes it. Anyone with owner credentials can operate
+the vault; Firebase roles, not hidden buttons, enforce this distinction.

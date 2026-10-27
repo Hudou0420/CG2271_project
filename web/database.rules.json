@@ -1,0 +1,78 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "access": {
+      "owners": { "$uid": { ".read": "auth != null && auth.uid === $uid" } },
+      "devices": { "$uid": { ".read": "auth != null && auth.uid === $uid" } }
+    },
+    "vault": {
+      "status": {
+        ".read": true,
+        ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
+        ".validate": "newData.hasChildren(['state', 'updatedAt']) && !newData.hasChild('code')",
+        "state": {
+          ".validate": "newData.isString() && newData.val().matches(/^(IDLE|LOCKED|DIALING|UNLOCKED|ALARM|UNKNOWN)$/)"
+        },
+        "updatedAt": { ".validate": "newData.isNumber()" }
+      },
+      "events": {
+        ".read": true,
+        ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
+        "$id": {
+          ".validate": "newData.hasChildren(['type','at']) && newData.child('type').isString() && newData.child('at').isNumber() && !newData.hasChild('code')"
+        }
+      },
+      "leaderboard": {
+        ".read": true,
+        ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
+        ".indexOn": ["seconds"],
+        "$id": {
+          ".validate": "newData.hasChildren(['player','seconds','attempts','at']) && !newData.hasChild('code')",
+          "player": {
+            ".validate": "newData.isString() && newData.val().length <= 24"
+          },
+          "seconds": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "attempts": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "at": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
+      },
+      "commands": {
+        ".read": "auth != null && (root.child('access/owners').child(auth.uid).val() === true || root.child('access/devices').child(auth.uid).val() === true)",
+        ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
+        "$id": {
+          ".write": "auth != null && root.child('access/owners').child(auth.uid).val() === true && !data.exists() && newData.exists()",
+          ".validate": "newData.hasChildren(['action','at']) && (newData.child('action').val() === 'disarm' || (newData.child('action').val() === 'arm' && newData.hasChildren(['code','player'])))",
+          "action": {
+            ".validate": "newData.val() === 'arm' || newData.val() === 'disarm'"
+          },
+          "code": {
+            ".validate": "newData.isString() && newData.val().matches(/^[0-9]{3}$/)"
+          },
+          "player": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 24"
+          },
+          "pattern": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 255 && newData.val() % 1 === 0"
+          },
+          "at": {
+            ".validate": "newData.isNumber() && newData.val() >= now - 60000 && newData.val() <= now + 5000"
+          },
+          "$other": { ".validate": false }
+        }
+      },
+      "commandResults": {
+        ".read": "auth != null && (root.child('access/owners').child(auth.uid).val() === true || root.child('access/devices').child(auth.uid).val() === true)",
+        ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
+        "$id": {
+          ".validate": "newData.hasChild('result') && newData.child('result').isString() && !newData.hasChild('code')"
+        }
+      }
+    }
+  }
+}
