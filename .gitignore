@@ -14,3 +14,6 @@ __pycache__/
 
 # API keys and Wi-Fi credentials (keep out of the repo and the submission)
 secrets.h
+
+#temp files
+/temp
