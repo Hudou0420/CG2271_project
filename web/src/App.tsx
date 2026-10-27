@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { connectVault } from "../vault-api.js";
 import Vault from "./components/Vault";
-import { CONFIG_KEY, getConfig, validConfig } from "./config";
+import { CONFIG_KEY, getConfig, parseFirebaseConfig } from "./config";
 import {
   canControl,
   COPY,
@@ -1125,27 +1125,23 @@ function ConnectionPanel({
   function save(e: FormEvent) {
     e.preventDefault();
     try {
-      const next = JSON.parse(text);
-      if (!validConfig(next)) throw new Error();
-      const safe = {
-        apiKey: next.apiKey,
-        authDomain: next.authDomain,
-        projectId: next.projectId,
-        databaseURL: next.databaseURL.replace(/\/$/, ""),
-      };
+      const safe = parseFirebaseConfig(text);
       localStorage.setItem(CONFIG_KEY, JSON.stringify(safe));
       location.href = "/";
-    } catch {
+    } catch (error) {
       setError(
-        "Paste valid JSON with apiKey, authDomain, databaseURL and projectId.",
+        error instanceof Error
+          ? error.message
+          : "Couldn’t save the connection. Check browser storage permissions.",
       );
     }
   }
   return (
     <form className="owner-form" onSubmit={save}>
       <p className="modal-intro">
-        Use the public web configuration from Firebase Project settings. Only
-        the four public fields below are saved in this browser.
+        Paste the firebaseConfig object from Firebase Project settings. JSON and
+        the console’s JavaScript object format both work. Only the four public
+        fields below are saved in this browser.
       </p>
       <label>
         Firebase web configuration

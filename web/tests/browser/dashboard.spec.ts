@@ -88,3 +88,16 @@ test("screenshots for desktop and phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: "test-results/phone.png", fullPage: true });
 });
+
+test('connection form identifies a missing database URL in a Firebase console snippet', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connection', exact: true }).click();
+  await page.getByLabel('Firebase web configuration').fill(`const firebaseConfig = {
+    apiKey: 'public-fixture',
+    authDomain: 'example.firebaseapp.com',
+    projectId: 'example',
+  };`);
+  await page.getByRole('button', { name: 'Save connection' }).click();
+  await expect(page.getByRole('alert')).toContainText('Missing databaseURL');
+  await expect(page.getByRole('alert')).toContainText('Realtime Database');
+});

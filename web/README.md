@@ -26,13 +26,17 @@ substitute for validating a physical round.
 
 ## Public Firebase configuration
 
-Copy `.env.example` to `.env.local` and fill the four `VITE_FIREBASE_*` fields
-from Firebase Project settings → your Web app. Restart Vite after changing it.
+Copy `.env.example` to `../../Project_Secrets/.env.local` relative to `web/`
+(`../Project_Secrets/.env.local` relative to `Project/`) and fill the four `VITE_FIREBASE_*` fields
+from Firebase Project settings → your Web app. Vite loads environment files from
+that external directory, not `web/.env.local`. Restart Vite after changing it.
 These fields are intentionally public browser configuration. Never place owner,
 device or Wi-Fi passwords, or a service-account private key, in `VITE_*` values.
 
 Alternatively, use **Connection** at the bottom of the dashboard and paste a
-JSON object containing `apiKey`, `authDomain`, `databaseURL`, and `projectId`.
+JSON or the Firebase Console’s `const firebaseConfig = { ... };` object containing
+`apiKey`, `authDomain`, `databaseURL`, and `projectId`. If the console omits
+`databaseURL`, add the URL shown under Realtime Database → Data.
 Only those fields are retained in local browser storage. The hosted production
 build should supply the configuration through `.env.local` at build time so
 visitors do not need to configure their own browsers.
