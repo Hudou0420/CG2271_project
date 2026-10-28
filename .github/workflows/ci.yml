@@ -1,0 +1,85 @@
+name: Vault CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  embedded:
+    name: ESP32 build and native firmware tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install PlatformIO
+        run: python -m pip install platformio
+
+      - name: Build ESP32 firmware (cloud and AI enabled for compilation)
+        run: |
+          # Keep test-only placeholders outside the repository, just like real secrets.
+          # This compiles the production Firebase/AI code without real credentials.
+          mkdir -p ../Project_Secrets
+          cp esp32/include/secrets.example.h ../Project_Secrets/secrets.h
+          pio run -d esp32 -e esp32s2
+
+      - name: Test shared UART packet protocol
+        run: pio test -d esp32 -e native
+
+      - name: Test MCU sensor logic and FSM integration
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -g -Isource \
+            tests/test_sensor_logic.c \
+            source/vault_sensor_logic.c source/vault_fsm.c \
+            -o /tmp/vault-sensor-tests
+          /tmp/vault-sensor-tests
+
+      - name: Test AI, HTTPS coordination and dashboard simulator
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+  dashboard:
+    name: Web build, Firebase rules and browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: TypeScript check and production build
+        run: npm run build
+
+      - name: Run dashboard unit tests
+        run: npm test
+
+      - name: Test Firebase Realtime Database security rules
+        run: npm run test:rules
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Test browser interface
+        run: npm run test:browser
+
+      - name: Test dashboard against local Auth/Database emulators
+        run: npm run test:live
