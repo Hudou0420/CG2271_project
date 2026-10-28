@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../fixtures";
 const database = "http://127.0.0.1:9000";
 const ns = "demo-vault-default-rtdb";
 const email = "team@vault.test";
@@ -45,7 +45,14 @@ test.beforeAll(async () => {
       body: JSON.stringify({ email, password, returnSecureToken: true }),
     },
   );
-  const data = await response.json();
+  let data = await response.json();
+  if (data.error?.message === "EMAIL_EXISTS") {
+    const login = await fetch("http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=demo-key", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    });
+    data = await login.json();
+  }
   uid = data.localId;
   if (!uid) throw new Error("Could not create emulator-only owner account");
 });
@@ -303,4 +310,57 @@ test("owner controls persist the AI setting and show private health", async ({
   await expect(page.getByText("Game master is off.")).toBeVisible();
   await write("vault/aiSettings/enabled", true);
   await expect(toggle).toBeChecked();
+});
+
+async function signIn(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Owner access" }).click();
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Set the next heist." })).toBeVisible();
+}
+
+test("sign-out removes owner controls and remains signed out after reload", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("button", { name: "Sign out of owner account" }).click();
+  await expect(page.getByRole("heading", { name: "Set the next heist." })).toHaveCount(0);
+  await page.reload();
+  await page.getByRole("button", { name: "Owner access" }).click();
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+  expect(await read("vault/commands")).toBeNull();
+});
+
+test("revoking owner access removes controls without a reload", async ({ page }) => {
+  await signIn(page);
+  await write(`access/owners/${uid}`, null);
+  await expect(page.getByText(/This account doesn’t have owner access/)).toBeVisible();
+  await expect(page.getByLabel("Secret code", { exact: true })).toHaveCount(0);
+  expect(await read("vault/commands")).toBeNull();
+});
+
+test("offline browser reconnects to authoritative status without replaying commands", async ({ page, context }) => {
+  await signIn(page);
+  await page.keyboard.press("Escape");
+  await context.setOffline(true);
+  await write("vault/status", liveStatus("UNLOCKED"));
+  await context.setOffline(false);
+  await expect(page.getByRole("img", { name: "The vault is unlocked" })).toBeVisible({ timeout: 15000 });
+  expect(await read("vault/commands")).toBeNull();
+});
+
+test("rapid repeated arm clicks queue one command", async ({ page }) => {
+  await signIn(page);
+  await page.getByLabel("Challenger", { exact: true }).fill("Repeat test");
+  await page.getByLabel("Secret code", { exact: true }).fill("007");
+  await page.getByRole("button", { name: "Arm the vault", exact: true }).evaluate(button => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+  await expect(page.getByRole("button", { name: "Waiting for the vault…", exact: true })).toBeDisabled();
+  // Wait for the command lifecycle to settle so a transient queue size of one
+  // cannot hide later duplicate writes. This exercises the real API timeout.
+  await expect(page.getByRole("status")).toContainText("timeout:", { timeout: 13000 });
+  expect(Object.keys(await read("vault/commands"))).toHaveLength(1);
 });

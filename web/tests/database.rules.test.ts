@@ -231,3 +231,36 @@ describe("game master permissions", () => {
     await assertSucceeds(remove(ref(db("esp"), "vault/aiMessage")));
   });
 });
+
+describe("atomic updates and role revocation", () => {
+  it("rejects parent replacement and atomic privilege escalation without partial writes", async () => {
+    await assertFails(set(ref(db("team"), "vault"), { commands: { bulk: arm() } }));
+    await assertFails(update(ref(db("team")), {
+      "vault/commands/atomic": arm(),
+      "access/owners/attacker": true,
+    }));
+    await assertFails(update(ref(db("esp")), {
+      "vault/status": { state: "UNLOCKED", updatedAt: Date.now() },
+      "access/owners/esp": true,
+    }));
+    await env.withSecurityRulesDisabled(async context => {
+      const database = context.database();
+      const command = await get(ref(database, "vault/commands/atomic"));
+      const status = await get(ref(database, "vault/status/state"));
+      if (command.exists() || status.val() !== "LOCKED") throw new Error("Denied atomic write partially committed");
+    });
+  });
+  it("revokes permissions for existing owner and device sessions immediately", async () => {
+    const owner = db("team"), device = db("esp");
+    await assertSucceeds(get(ref(owner, "vault/commands")));
+    await assertSucceeds(get(ref(device, "vault/commands")));
+    await env.withSecurityRulesDisabled(async context => {
+      await remove(ref(context.database(), "access"));
+    });
+    await assertFails(set(ref(owner, "vault/commands/revoked"), arm()));
+    await assertFails(set(ref(owner, "vault/aiSettings/enabled"), false));
+    await assertFails(get(ref(owner, "vault/commands")));
+    await assertFails(set(ref(device, "vault/status"), { state: "UNLOCKED", updatedAt: Date.now() }));
+    await assertSucceeds(get(ref(db(), "vault/status")));
+  });
+});

@@ -1,7 +1,7 @@
-// Gemini uses the existing Arduino loop task/client. Firebase stays in tCloud.
-// This saves a separate 12 KiB task stack on the ESP32-S2.
+// Gemini shares tCloud and the secure client with Firebase. No AI task stack.
 #include "ai.h"
 #include "https_guard.h"
+#include "https_client.h"
 #include "ai_response.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -59,40 +59,7 @@ static bool response(HTTPClient &http, String &body) {
     }
     return remaining <= 0;
 }
-void ai_poll() {
-    AiJob job{};
-    if (!jobs || xQueueReceive(jobs, &job, 0) != pdTRUE) return;
-    if (!current(job)) { memset(&job, 0, sizeof(job)); return; }
-    // Publish the local response before Gemini occupies the shared TLS
-    // budget. Otherwise its request could delay its own fallback on screen.
-    uint32_t waitStart = millis();
-    while (current(job) && !published(job) && millis() - waitStart < 10000) {
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
-    if (!current(job) || !published(job)) { memset(&job, 0, sizeof(job)); return; }
-    uint32_t now = millis();
-    taskENTER_CRITICAL(&mux);
-    bool cooling = (int32_t)(cooldownUntil - now) > 0;
-    bool pacing = (int32_t)(nextRequest - now) > 0;
-    taskEXIT_CRITICAL(&mux);
-    if (cooling || pacing) {
-        if (!cooling) health("rate-limited");
-        memset(&job, 0, sizeof(job)); return;
-    }
-    if (WiFi.status() != WL_CONNECTED) { health("offline"); memset(&job, 0, sizeof(job)); return; }
-    // Wait for Firebase/auth to release their TLS buffers. Recheck the
-    // round afterwards: an event may have expired while waiting.
-    HttpsLease lease(1000);
-    if (!lease.acquired()) { health("unavailable"); memset(&job, 0, sizeof(job)); return; }
-    if (!current(job)) { memset(&job, 0, sizeof(job)); return; }
-    if (ESP.getFreeHeap() < 85000 || ESP.getMaxAllocHeap() < 40000) { health("low-memory"); memset(&job, 0, sizeof(job)); return; }
-    taskENTER_CRITICAL(&mux);
-    nextRequest = millis() + 15000;
-    taskEXIT_CRITICAL(&mux);
-    health("requesting");
-    Serial.printf("[ai] requesting; heap=%lu maxBlock=%lu minHeap=%lu\n",
-                  (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap(),
-                  (unsigned long)ESP.getMinFreeHeap());
+static String build_payload(const AiJob &job) {
     JsonDocument context;
     context["event"] = job.type == VP_ATTEMPT ? "wrong_guess" : job.type == VP_SOLVED ? "solved" : "alarm";
     if (job.hasCode) context["secretCode"] = job.code;
@@ -120,12 +87,41 @@ void ai_poll() {
     gen["responseSchema"]["properties"]["reaction"]["type"] = "STRING";
     gen["responseSchema"]["required"][0] = "reaction";
     String payload; serializeJson(request, payload);
-    // Drop the context copies before TLS allocates its buffers.
-    context.clear(); request.clear(); event = "";
-    NetworkClientSecure tls;
+    return payload;
+}
+void ai_poll() {
+    AiJob job{};
+    if (!jobs || xQueueReceive(jobs, &job, 0) != pdTRUE) return;
+    if (!current(job)) { memset(&job, 0, sizeof(job)); return; }
+    // tCloud must keep publishing while a reaction waits. Never wait here for
+    // work that this same task still needs to do. Preserve a newer queued job.
+    if (!published(job)) {
+        xQueueSendToFront(jobs, &job, 0);
+        memset(&job, 0, sizeof(job));
+        return;
+    }
+    uint32_t now = millis();
+    taskENTER_CRITICAL(&mux);
+    bool cooling = (int32_t)(cooldownUntil - now) > 0;
+    bool pacing = (int32_t)(nextRequest - now) > 0;
+    taskEXIT_CRITICAL(&mux);
+    if (cooling || pacing) {
+        if (!cooling) health("rate-limited");
+        memset(&job, 0, sizeof(job)); return;
+    }
+    if (WiFi.status() != WL_CONNECTED) { health("offline"); memset(&job, 0, sizeof(job)); return; }
+    // Wait for Firebase/auth to release their TLS buffers. Recheck the
+    // round afterwards: an event may have expired while waiting.
+    HttpsLease lease(1000);
+    if (!lease.acquired()) { health("unavailable"); memset(&job, 0, sizeof(job)); return; }
+    if (!current(job)) { memset(&job, 0, sizeof(job)); return; }
+    String payload = build_payload(job);
+    NetworkClientSecure &tls = https_client();
+    tls.stop();
     HTTPClient http;
     tls.useBuiltinCACertBundle();
     tls.setHandshakeTimeout(8);
+    http.setReuse(false);
     http.setConnectTimeout(8000); http.setTimeout(8000); http.useHTTP10(true);
     int code = -1;
     String reply;
@@ -133,9 +129,31 @@ void ai_poll() {
     if (http.begin(tls, String("https://generativelanguage.googleapis.com/v1beta/models/") + GEMINI_MODEL + ":generateContent")) {
         http.addHeader("Content-Type", "application/json");
         http.addHeader("x-goog-api-key", GEMINI_API_KEY);
+        // Measure with the serialized request and HTTP headers already allocated.
+        const auto &budget = https_memory_budget();
+        if (!budget.permits(ESP.getFreeHeap(), ESP.getMaxAllocHeap())) {
+            Serial.printf("[ai] low-memory; heap=%lu maxBlock=%lu required=%lu blockRequired=%lu\n",
+                          (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap(),
+                          (unsigned long)budget.required(), (unsigned long)budget.minimumBlock);
+            http.end(); tls.stop();
+            health("low-memory"); memset(&job, 0, sizeof(job)); return;
+        }
+        // A skipped attempt must not advertise a cooldown for a request that
+        // never happened. Pacing starts only after the memory check succeeds.
+        taskENTER_CRITICAL(&mux);
+        nextRequest = millis() + 15000;
+        taskEXIT_CRITICAL(&mux);
+        health("requesting");
+        Serial.printf("[ai] requesting; heap=%lu maxBlock=%lu required=%lu\n",
+                      (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap(),
+                      (unsigned long)budget.required());
+        HttpsMemorySample memory("Gemini");
         code = http.POST(payload);
-        payload = "";
+        // Arduino String assignment to "" retains capacity; nullptr releases it.
+        payload = static_cast<const char *>(nullptr);
         if (code == 200 && !response(http, reply)) code = -2;
+        http.end(); tls.stop();
+        memory.finish(code == 200);
     }
     http.end(); tls.stop();
     const char *reason = "unavailable";
@@ -155,6 +173,10 @@ void ai_poll() {
     strlcpy(view.health, reason, sizeof(view.health));
     ++view.version;
     taskEXIT_CRITICAL(&mux);
+    Serial.printf("[ai] completed; HTTP=%d result=%s heap=%lu maxBlock=%lu minHeap=%lu stackFree=%lu\n",
+                  code, reason, (unsigned long)ESP.getFreeHeap(),
+                  (unsigned long)ESP.getMaxAllocHeap(), (unsigned long)ESP.getMinFreeHeap(),
+                  (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
     // No raw prompts, provider errors or keys are logged or sent to Firebase.
     memset(&job, 0, sizeof(job));
 }

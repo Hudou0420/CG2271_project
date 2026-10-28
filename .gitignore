@@ -27,3 +27,7 @@ web/playwright-report/
 web/test-results/
 web/.firebase/
 web/*-debug.log
+
+# Isolated CI validation builds and test reports
+/build-ci/
+/test-reports/

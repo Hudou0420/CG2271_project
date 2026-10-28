@@ -4,82 +4,220 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '19 3 * * *'
 
 permissions:
   contents: read
 
+concurrency:
+  group: vault-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  embedded:
-    name: ESP32 build and native firmware tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+  workflow:
+    name: Workflow syntax
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
-
-      - name: Install PlatformIO
-        run: python -m pip install platformio
-
-      - name: Build ESP32 firmware (cloud and AI enabled for compilation)
+      - name: Validate GitHub Actions expressions and job definitions
         run: |
-          # Keep test-only placeholders outside the repository, just like real secrets.
-          # This compiles the production Firebase/AI code without real credentials.
-          mkdir -p ../Project_Secrets
-          cp esp32/include/secrets.example.h ../Project_Secrets/secrets.h
-          pio run -d esp32 -e esp32s2
+          set -o pipefail
+          mkdir -p test-reports/workflow
+          actionlint_path=$(python3 ci/setup_tools.py actionlint)
+          "$actionlint_path" -color 2>&1 | tee test-reports/workflow/actionlint.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: workflow-validation
+          path: test-reports/workflow/
+          retention-days: 14
 
-      - name: Test shared UART packet protocol
-        run: pio test -d esp32 -e native
-
-      - name: Test MCU sensor logic and FSM integration
-        run: |
-          gcc -std=c11 -Wall -Wextra -Werror -g -Isource \
-            tests/test_sensor_logic.c \
-            source/vault_sensor_logic.c source/vault_fsm.c \
-            -o /tmp/vault-sensor-tests
-          /tmp/vault-sensor-tests
-
-      - name: Test AI, HTTPS coordination and dashboard simulator
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
-
-  dashboard:
-    name: Web build, Firebase rules and browser tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: web
+  mcx:
+    name: MCXC444 / ${{ matrix.profile }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [debug, release, selftest, beam]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/vault-ci-downloads
+          key: vault-tools-${{ runner.os }}-${{ hashFiles('ci/setup_tools.py') }}
+      - name: Install verified GNU Arm toolchain
+        run: echo "ARM_TOOLCHAIN_PREFIX=$(python3 ci/setup_tools.py arm)" >> "$GITHUB_ENV"
+      - name: Compile, link and verify full MCU image
+        run: python3 ci/mcx_build.py --profile '${{ matrix.profile }}'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mcx-${{ matrix.profile }}
+          path: build-ci/mcx/${{ matrix.profile }}/
+          retention-days: 14
+
+  esp32:
+    name: ESP32 / ${{ matrix.profile }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [online, offline]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.platformio/.cache
+          key: pio-downloads-${{ runner.os }}-${{ hashFiles('esp32/platformio.ini', 'ci/esp32_build.py') }}
+      - run: python3 -m pip install platformio==6.2.0
+      - name: Build with isolated synthetic configuration
+        run: python3 ci/esp32_build.py --profile '${{ matrix.profile }}'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: esp32-${{ matrix.profile }}
+          path: |
+            build-ci/esp32/${{ matrix.profile }}/build.log
+            build-ci/esp32/${{ matrix.profile }}/wrapper-check.txt
+            build-ci/esp32/${{ matrix.profile }}/build/**/*.elf
+            build-ci/esp32/${{ matrix.profile }}/build/**/*.map
+            build-ci/esp32/${{ matrix.profile }}/build/**/*.su
+          retention-days: 14
+
+  native:
+    name: Native sanitizers / ${{ matrix.compiler }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    env:
+      CC: ${{ matrix.compiler == 'gcc' && 'gcc' || 'clang' }}
+      CXX: ${{ matrix.compiler == 'gcc' && 'g++' || 'clang++' }}
+      VAULT_TEST_OUTPUT: test-reports/native/${{ matrix.compiler }}
+      VAULT_COVERAGE: ${{ matrix.compiler == 'gcc' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/vault-ci-downloads
+          key: vault-tools-${{ runner.os }}-${{ hashFiles('ci/setup_tools.py') }}
+      - name: Install verified ArduinoJson headers
+        run: echo "ARDUINOJSON_INCLUDE=$(python3 ci/setup_tools.py json)" >> "$GITHUB_ENV"
+      - name: Firmware regressions and fixed-seed properties
+        run: python3 ci/run_tests.py
+      - name: Coverage of production sources exercised by runtime harnesses
+        if: always() && matrix.compiler == 'gcc'
+        run: |
+          python3 -m pip install gcovr==8.3
+          gcovr --root . --filter 'source/|esp32/src/|common/' --object-directory test-reports/native/gcc --xml test-reports/native/gcc/coverage.xml --html-details test-reports/native/gcc/coverage.html --print-summary
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: native-${{ matrix.compiler }}
+          path: test-reports/native/${{ matrix.compiler }}/
+          retention-days: 14
+
+  protocol:
+    name: Existing Unity protocol regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install platformio==6.2.0
+      - name: Run Unity protocol suite
+        run: |
+          set -o pipefail
+          mkdir -p test-reports
+          pio test -d esp32 -c "$PWD/esp32/platformio.ci.ini" -e native --junit-output-path "$PWD/test-reports/protocol.xml" 2>&1 | tee test-reports/protocol.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: protocol
+          path: |
+            test-reports/protocol.xml
+            test-reports/protocol.log
+          retention-days: 14
+
+  web:
+    name: Web / ${{ matrix.suite }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [dashboard, firebase]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        if: matrix.suite == 'firebase'
         with:
           distribution: temurin
           java-version: '21'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: matrix.suite == 'firebase'
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - run: npm ci
+        working-directory: web
+      - run: npx --no-install playwright install --with-deps chromium
+        working-directory: web
+      - name: Run all suite checks and retain individual failures
+        run: python3 ci/web_checks.py --suite '${{ matrix.suite }}'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: web-${{ matrix.suite }}
+          path: |
+            test-reports/web/${{ matrix.suite }}/
+            web/*-debug.log
+          retention-days: 14
 
-      - name: Install web dependencies
-        run: npm ci
-
-      - name: TypeScript check and production build
-        run: npm run build
-
-      - name: Run dashboard unit tests
-        run: npm test
-
-      - name: Test Firebase Realtime Database security rules
-        run: npm run test:rules
-
-      - name: Install Chromium for Playwright
-        run: npx playwright install --with-deps chromium
-
-      - name: Test browser interface
-        run: npm run test:browser
-
-      - name: Test dashboard against local Auth/Database emulators
-        run: npm run test:live
+  stress:
+    name: Seeded firmware stress / 100000 scenarios
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VAULT_TEST_OUTPUT: test-reports/stress
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - run: python3 ci/run_tests.py --stress
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: stress-replays
+          path: test-reports/stress/
+          retention-days: 14

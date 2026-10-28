@@ -1,10 +1,10 @@
 // cloud.cpp - web dashboard link over Firebase Realtime Database (REST).
 //
-// tCloud owns Firebase HTTPS; Arduino loop owns Gemini HTTPS. Status, commands,
+// tCloud owns Firebase and Gemini HTTPS. Status, commands,
 // queued events and AI data get fair turns on the database client. Event
 // retries retain their progress without blocking status or owner controls.
 // Certificates are verified using the core's built-in CA bundle. All HTTPS
-// clients share a lease; Firebase closes TLS after each request to leave room
+// requests share one client and a lease; each request closes TLS to leave room
 // for Gemini and token refreshes without overlapping TLS heaps.
 // Database layout: web/README.md.
 #include "cloud.h"
@@ -16,6 +16,7 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <NetworkClientSecure.h>
+#include "https_client.h"
 #include <WiFi.h>
 
 #include "config.h"
@@ -73,8 +74,7 @@ struct Published {
     AiTag      ai;
 };
 
-static NetworkClientSecure s_tls; // context reused; TLS buffers released after every request
-static HTTPClient          s_http;
+static NetworkClientSecure &s_tls = https_client(); // one shared context for all HTTPS
 static bool                s_transportFailed;
 static String              s_idToken;
 static String              s_refreshToken;
@@ -157,7 +157,8 @@ static bool auth_post(const String &url, const char *contentType, const String &
     HttpsLease lease;
     if (!lease.acquired()) { set_error("HTTPS memory guard unavailable"); return false; }
     // The previous database request released its TLS buffers before this lease.
-    NetworkClientSecure tls;
+    NetworkClientSecure &tls = https_client();
+    tls.stop();
     HTTPClient          http;
 
     tls.useBuiltinCACertBundle();
@@ -170,10 +171,12 @@ static bool auth_post(const String &url, const char *contentType, const String &
         return false;
     }
     http.addHeader("Content-Type", contentType);
+    HttpsMemorySample memory("Firebase auth");
     int    code = http.POST(body);
     String resp = code > 0 ? http.getString() : String();
     http.end();
     tls.stop();
+    memory.finish(code == 200);
     count_request(code == 200, code);
 
     if (code != 200) {
@@ -265,6 +268,19 @@ static bool ensure_signed_in()
 
 // ---- Database requests ---------------------------------------------------------
 
+// URL/query copies contain the long ID token. Keep them out of the TLS
+// lifetime; HTTPClient retains its own URI until its destructor runs.
+static bool begin_database_request(HTTPClient &http, const String &path, const String &query)
+{
+    String url = String(FIREBASE_DB_URL) + CLOUD_ROOT + path + ".json";
+    String q = query;
+    if (s_idToken.length() > 0) {
+        q += (q.length() > 0 ? "&auth=" : "auth=") + s_idToken;
+    }
+    if (q.length() > 0) url += "?" + q;
+    return http.begin(s_tls, url);
+}
+
 // path is relative to CLOUD_ROOT, e.g. "/status". Returns the HTTP code
 // (<= 0 for network errors) and stores the reply body in *reply if given.
 static int db_request(const char *method, const String &path, const String &query,
@@ -272,30 +288,28 @@ static int db_request(const char *method, const String &path, const String &quer
 {
     HttpsLease lease;
     if (!lease.acquired()) { set_error("HTTPS memory guard unavailable"); return -1; }
-    String url = String(FIREBASE_DB_URL) + CLOUD_ROOT + path + ".json";
-    String q   = query;
-    if (s_idToken.length() > 0) {
-        q += (q.length() > 0 ? "&auth=" : "auth=") + s_idToken;
-    }
-    if (q.length() > 0) {
-        url += "?" + q;
-    }
-
-    s_http.setReuse(false);
+    // end() closes the socket but retains String capacities, including the
+    // authenticated URI. Destruction releases them before Gemini gets a turn.
+    HTTPClient http;
+    http.setReuse(false);
+    http.setConnectTimeout(CLOUD_HTTP_TIMEOUT_MS);
+    http.setTimeout(CLOUD_HTTP_TIMEOUT_MS);
     s_tls.stop();
-    if (!s_http.begin(s_tls, url)) {
+    if (!begin_database_request(http, path, query)) {
         set_error("bad database URL, check FIREBASE_DB_URL");
         return -1;
     }
     if (body.length() > 0) {
-        s_http.addHeader("Content-Type", "application/json");
+        http.addHeader("Content-Type", "application/json");
     }
-    int    code = s_http.sendRequest(method, body);
+    HttpsMemorySample memory("Firebase database");
+    int    code = http.sendRequest(method, body);
     char tlsReason[96] = {};
     int tlsError = code <= 0 ? s_tls.lastError(tlsReason, sizeof(tlsReason)) : 0;
-    String resp = code > 0 ? s_http.getString() : String();
-    s_http.end();
+    String resp = code > 0 ? http.getString() : String();
+    http.end();
     s_tls.stop(); // release the TLS heap before another client can acquire the lease
+    memory.finish(code == 200);
 
     bool ok = code == 200;
     count_request(ok, code);
@@ -769,10 +783,6 @@ static void cloud_task(void *)
     s_wifiBeginMs = millis();
     s_tls.useBuiltinCACertBundle();
     s_tls.setHandshakeTimeout(8);
-    s_http.setReuse(false);
-    s_http.setConnectTimeout(CLOUD_HTTP_TIMEOUT_MS);
-    s_http.setTimeout(CLOUD_HTTP_TIMEOUT_MS);
-
     for (;;) {
         CloudItem item;
         bool      haveItem = xQueuePeek(s_queue, &item, pdMS_TO_TICKS(100)) == pdTRUE;
@@ -825,6 +835,7 @@ static void cloud_task(void *)
             break;
         case CLOUD_AI:
             sync_ai();
+            ai_poll(); // nonblocking deferral until fallback/event/status are published
             lastAiSyncMs = millis();
             break;
         case CLOUD_WAIT:

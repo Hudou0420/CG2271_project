@@ -6,7 +6,7 @@
 //   tLink  (prio 3)  UART link to the MCXC444: parse, ACK/NAK, retransmit
 //   tImu   (prio 2)  MPU-6050 at 20 Hz -> TAMPER while armed
 //   tCloud (prio 1)  Wi-Fi + Firebase: status, events, dashboard commands
-//   loop() (prio 1)  debug console + Gemini, sharing one existing task stack
+//   loop() (prio 1)  debug console; Gemini shares tCloud and its HTTPS client
 #include <Arduino.h>
 
 #include "cloud.h"
@@ -15,8 +15,10 @@
 #include "link.h"
 #include "vault_state.h"
 
-// TLS needs the same stack budget as tCloud, without a dedicated AI task.
-SET_LOOP_TASK_STACK_SIZE(12288);
+// The console no longer performs HTTPS. Compiler stack reports for its own
+// handlers are small (32--160 bytes each); retain 6 KiB for core/library calls.
+// tCloud keeps its 12 KiB TLS stack. Report runtime console headroom via 'cloud'.
+SET_LOOP_TASK_STACK_SIZE(6144);
 
 // ---- Messages from the MCU (runs in tLink, keep it short) ------------------
 
@@ -187,6 +189,8 @@ static void print_cloud()
     if (c.lastError[0] != '\0') {
         Serial.printf("cloud: last error: %s\n", c.lastError);
     }
+    Serial.printf("console: minimum stack headroom %lu bytes\n",
+                  (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
 }
 
 static void handle_command(char *line)
@@ -309,6 +313,5 @@ void setup()
 void loop()
 {
     poll_console();
-    ai_poll();
     vTaskDelay(pdMS_TO_TICKS(10));
 }

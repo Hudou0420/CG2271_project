@@ -67,7 +67,12 @@ python3 tools/dashboard_sim.py events -n 20
 python3 tools/dashboard_sim.py leaderboard
 ```
 
-Wi-Fi and HTTPS run in their own lowest-priority task (`tCloud`), so a slow or missing network never delays the UART link or tamper detection.
+Wi-Fi, Firebase and Gemini HTTPS share the lowest-priority task (`tCloud`) and one secure client. A slow network never delays the UART link, tamper detection or USB console. Gemini can briefly delay dashboard commands; it starts only after the local reaction and event have been published. Its memory guard uses measured HTTPS heap usage plus a reserve; see `web/README.md` for diagnostics and board verification.
+
+The ESP32 build flags also apply a Wi-Fi memory profile before driver startup:
+two static RX buffers, eight dynamic RX/TX buffers, and frame aggregation off.
+This limits peak throughput to leave more RAM for HTTPS. Keep the
+`--wrap=esp_wifi_init` linker flag; `[wifi] memory profile` confirms it at boot.
 
 ## Testing without the MCU (loopback)
 

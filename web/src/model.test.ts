@@ -132,3 +132,29 @@ describe("game master message lifetime", () => {
     ).toBeNull();
   });
 });
+
+describe("untrusted snapshots and timer boundaries", () => {
+  it("rejects malformed AI sources, non-string text and overlong text", () => {
+    const status = { state: "LOCKED" as const, espOnline: true, mcuOnline: true, roundId: "r", actionRevision: 1 };
+    const events = [{ id: "e", type: "attempt", roundId: "r", actionRevision: 1, at: 1 }];
+    const valid = { roundId: "r", eventId: "e", actionRevision: 1, message: "x".repeat(191), source: "local" as const, at: 1 };
+    expect(visibleAiMessage(valid, status, events)).toEqual(valid);
+    for (const patch of [{ source: "unknown" }, { message: 42 }, { message: "x".repeat(192) }]) {
+      expect(visibleAiMessage({ ...valid, ...patch } as unknown as typeof valid, status, events)).toBeNull();
+    }
+  });
+  it("orders equal timestamps deterministically and replaces duplicate snapshots", () => {
+    const input = [{ id: "b", type: "attempt", at: 1 }, { id: "a", type: "armed", at: 1 }, { id: "b", type: "attempt", at: 1, guess: "007" }];
+    expect(sortedEvents(input).map(e => e.id)).toEqual(["a", "b"]);
+    expect(roundContext(input).attempts[0].guess).toBe("007");
+    expect(input).toHaveLength(3);
+  });
+  it("clamps future starts and observes the exact lockout deadline", () => {
+    const events = [{ id: "a", type: "armed", at: 1000 }, { id: "b", type: "alarm", at: 2000 }];
+    expect(timerValues(events, "LOCKED", 999).elapsed).toBe(0);
+    expect(timerValues(events, "ALARM", 31999).lockout).toBe(1);
+    expect(timerValues(events, "ALARM", 32000).lockout).toBe(0);
+    expect(formatTime(Number.NaN)).toBe("—:—");
+    expect(formatTime(Number.POSITIVE_INFINITY)).toBe("—:—");
+  });
+});

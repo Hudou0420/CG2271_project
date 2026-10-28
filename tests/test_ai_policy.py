@@ -10,8 +10,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 class AiPolicyTests(unittest.TestCase):
     def test_policy_and_mock_provider(self):
-        json_include = ROOT / "esp32/.pio/libdeps/esp32s2/ArduinoJson/src"
-        self.assertTrue(json_include.exists(), "Run pio run in esp32 first to install ArduinoJson")
+        json_include = pathlib.Path(os.environ.get("ARDUINOJSON_INCLUDE", str(ROOT / "esp32/.pio/libdeps/esp32s2/ArduinoJson/src")))
+        self.assertTrue(json_include.exists(), "Set ARDUINOJSON_INCLUDE with python3 ci/setup_tools.py json")
         with tempfile.TemporaryDirectory(prefix="vault-ai-tests-") as folder:
             binary = str(pathlib.Path(folder) / "ai-tests")
             subprocess.run(shlex.split(os.environ.get("CXX", "g++")) + [ "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined", "-g",

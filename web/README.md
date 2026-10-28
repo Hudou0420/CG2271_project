@@ -289,23 +289,47 @@ reboots, console/raw commands and an offline MCU invalidate code context. Basic
 reactions continue until the next confirmed dashboard arm. Disarm, solve and
 replacement arms clear the active code held in RAM.
 
-Gemini uses the existing Arduino background loop and a verified TLS client, a one-item pending queue,
+Gemini uses the existing cloud task and a verified TLS client, a one-item pending queue,
 eight-second connection/read timeouts, a bounded response body and at least 15
 seconds between requests. Events are never automatically retried. Quota errors
 start a one-minute cooldown, doubling up to ten minutes. Invalid keys/models pause
 requests for ten minutes. Low heap skips a request. There is no paid fallback;
 keep billing disabled for strictly free operation.
 
-On the ESP32-S2, Firebase, token refresh and Gemini share a mutex so only one TLS
-session can allocate handshake/buffer memory at a time. Firebase closes its TLS
-connection after each request. Gemini waits until its local reaction, source event
-and current status have been published, then requests the TLS lease and rechecks
-free heap and the largest available block. If the lease or memory is unavailable,
-it keeps the local fallback. Firebase requests can briefly wait during a Gemini
-call; the MCU game, UART and IMU tasks remain independent. The existing Arduino
-loop has a 12 KiB stack instead of 8 KiB, saving 8 KiB overall compared with a
-separate 12 KiB AI task. USB debug commands are processed between AI jobs;
-Firebase owner controls run in their own task.
+On the ESP32-S2, Firebase, token refresh and Gemini share one secure client and a
+mutex. Each request closes its TLS connection and releases the buffers. Gemini
+waits until its local reaction, source event and current status have been
+published, deferring to a later cloud-task turn while publication is pending.
+Request-building JSON documents and context strings are destroyed before TLS
+starts. Firebase uses a temporary HTTP object per request, releasing its retained
+authenticated URI and header buffers before Gemini starts. URL/query-building
+copies are also destroyed before the database handshake. Firebase and Gemini use the existing 12 KiB cloud stack; the Arduino
+console loop uses a 6 KiB stack and remains responsive during AI calls. The
+`cloud` USB command reports its minimum remaining stack headroom.
+Firebase owner commands can briefly wait during a Gemini call; UART, IMU and MCU
+game processing remain independent.
+
+The ESP32-S2 Wi-Fi profile uses two static receive buffers, caps dynamic receive
+and transmit buffers at eight, and disables frame aggregation. This trades peak
+Wi-Fi throughput for bounded RAM use during HTTPS traffic. A project linker
+wrapper applies the profile before the stock Arduino driver initializes; no SDK
+files are patched. Keep `--wrap=esp_wifi_init` in the ESP32 build flags. Startup
+prints `[wifi] memory profile` so a board test can confirm the profile is active.
+
+The Gemini memory guard requires a successful HTTPS measurement, free internal
+heap covering the largest measured request allocation plus an 8 KiB reserve, and
+an available block of at least 18 KiB for the core's 16 KiB TLS buffers. It measures
+a fresh local heap minimum for each HTTPS request instead of using the boot-time
+minimum. ESP-IDF sums per-region low-water marks, so this estimate is conservative
+and can include minima reached at different instants. This is an empirical budget: a different server or certificate chain can
+need more heap, so it still requires board testing. A larger observed peak raises
+the budget for subsequent requests, including after a failed request. If the
+budget is unavailable, Gemini keeps the local fallback without starting a request
+cooldown. When the budget rises, `[https] budget raised` identifies Firebase auth,
+Firebase database or Gemini, along with the starting heap and measured minimum.
+Serial output reports `[ai] low-memory` with available/required heap, or `[ai] requesting` followed by
+`[ai] completed` with HTTP result, heap and cloud-stack headroom. It never prints
+the prompt, API key or raw provider errors.
 
 ### Database additions
 

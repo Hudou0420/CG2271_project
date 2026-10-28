@@ -8,7 +8,7 @@ struct AiSnapshot {
     char health[32];
 };
 void ai_init();
-void ai_poll(); // call from Arduino loop; processes at most one pending reaction
+void ai_poll(); // call from tCloud; processes at most one pending reaction
 void ai_prepare_arm(const uint8_t *code, vp_state_t before, uint8_t attempts);
 void ai_cancel_context();
 void ai_delivery(uint8_t type, bool ok);

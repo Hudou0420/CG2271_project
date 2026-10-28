@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../fixtures";
 for (const state of [
   "IDLE",
   "LOCKED",
@@ -61,7 +61,7 @@ test("public preview cannot send device commands, and help keeps the rhythm secr
     page.getByRole("dialog").getByText(/300|900|0\.3|0\.9/),
   ).toHaveCount(0);
 });
-test("phone layout and reduced motion remain usable", async ({ page }) => {
+test("phone layout and reduced motion remain usable", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/?preview=1&state=ALARM");
@@ -76,17 +76,17 @@ test("phone layout and reduced motion remain usable", async ({ page }) => {
   await page.getByRole("button", { name: "Owner access" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.screenshot({
-    path: "test-results/phone-owner.png",
+    path: testInfo.outputPath("phone-owner.png"),
     fullPage: true,
   });
 });
-test("screenshots for desktop and phone", async ({ page }) => {
+test("screenshots for desktop and phone", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.goto("/?preview=1&state=DIALING");
   await page.evaluate(() => document.fonts.ready);
-  await page.screenshot({ path: "test-results/desktop.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: "test-results/phone.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("phone.png"), fullPage: true });
 });
 
 test('connection form identifies a missing database URL in a Firebase console snippet', async ({ page }) => {
