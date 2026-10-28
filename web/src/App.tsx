@@ -33,6 +33,9 @@ import { connectVault } from "../vault-api.js";
 import Vault from "./components/Vault";
 import { CONFIG_KEY, getConfig, parseFirebaseConfig } from "./config";
 import {
+  visibleAiMessage,
+  type AiMessage,
+  type AiHealth,
   canControl,
   COPY,
   EMPTY_STATUS,
@@ -146,6 +149,7 @@ export default function App() {
   const [config] = useState(getConfig);
   const [api, setApi] = useState<Api | null>(null);
   const [status, setStatus] = useState<Status>(EMPTY_STATUS);
+  const [aiMessage, setAiMessage] = useState<AiMessage | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [scores, setScores] = useState<Score[]>([]);
   const [owner, setOwner] = useState(false);
@@ -202,6 +206,7 @@ export default function App() {
             setStatus(s);
           }, failed),
         );
+        stops.push(client.onAiMessage(setAiMessage, failed));
         stops.push(
           client.onEventHistory(
             (rows: GameEvent[]) => setEvents(sortedEvents(rows)),
@@ -291,6 +296,7 @@ export default function App() {
       : "UNKNOWN"
     : "UNKNOWN";
   const copy = COPY[state];
+  const reaction = visibleAiMessage(aiMessage, status, events);
   const round = roundContext(events);
   const timers = timerValues(events, state, now);
   const controls = canControl(status, busy, owner);
@@ -489,7 +495,12 @@ export default function App() {
               </div>
               <div className="speech-bubble" aria-live="polite">
                 <span className="bubble-dot" />
-                {copy.bubble}
+                <span>{reaction?.message ?? copy.bubble}</span>
+                {reaction && (
+                  <small className="ai-source">
+                    {reaction.source === "gemini" ? "Gemini" : "Local"}
+                  </small>
+                )}
               </div>
               <Vault
                 state={state}
@@ -1081,6 +1092,7 @@ function OwnerPanel({
           </p>
         )}
       </form>
+      <GameMasterControls api={api} online={status.espOnline} />
       <details className="diagnostics">
         <summary>
           Device diagnostics <ChevronRight size={15} />
@@ -1175,5 +1187,107 @@ function ConnectionPanel({
         Save connection <ArrowRight size={18} />
       </button>
     </form>
+  );
+}
+
+function GameMasterControls({ api, online }: { api: Api; online: boolean }) {
+  const [settings, setSettings] = useState<{
+    enabled: boolean;
+    loaded: boolean;
+    health: AiHealth | null;
+  }>({ enabled: true, loaded: false, health: null });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(
+    () => api.onAiOwner(setSettings, (e) => setError(errorText(e))),
+    [api],
+  );
+  const health = settings.health;
+  const reasons: Record<string, string> = {
+    "not-configured":
+      "Add the Gemini key to the ESP32 to enable generated reactions.",
+    "waiting-settings": "Waiting for the device to load its settings.",
+    requesting: "Asking Gemini…",
+    ready: "Ready for Gemini reactions.",
+    offline: "Gemini is offline. Local reactions are available.",
+    "rate-limited": "Keeping reactions spaced out. Local reaction active.",
+    "quota-cooldown": "Free quota reached. Using local reactions.",
+    "key-rejected":
+      "Gemini rejected the key. Check its project and permissions.",
+    "model-unavailable": "The configured Gemini model is unavailable.",
+    "invalid-response": "Response skipped. Using a local reaction.",
+    "network-timeout": "Gemini did not respond. Using local reactions.",
+    "low-memory": "Local reactions active while device memory is low.",
+    "worker-unavailable":
+      "AI worker could not start. Local reactions are active.",
+  };
+  async function toggle(value: boolean) {
+    setSaving(true);
+    setError("");
+    try {
+      await api.setAiEnabled(value);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+  const stale = !online || !health || Date.now() - health.updatedAt > 30000;
+  return (
+    <section
+      className="game-master-controls"
+      aria-labelledby="game-master-heading"
+    >
+      <h3 id="game-master-heading">Game master</h3>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={settings.enabled}
+          disabled={!settings.loaded || saving}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        Enable reactions and hints
+      </label>
+      <p className="muted-note">
+        {!settings.enabled
+          ? "Game master is off."
+          : stale
+            ? "Waiting for device diagnostics."
+            : (reasons[health.health] ?? "Local reactions are ready.")}
+      </p>
+      {settings.enabled && !stale && !health.hasCode && (
+        <p className="muted-note">
+          Useful hints need a confirmed round. Disarm, then arm the vault to
+          restore them.
+        </p>
+      )}
+      {settings.enabled && !stale && health.cooldownSeconds > 0 && (
+        <p className="muted-note">
+          Gemini retry available in about {health.cooldownSeconds} seconds.
+        </p>
+      )}
+      {!stale && (
+        <details className="diagnostics">
+          <summary>
+            AI diagnostics <ChevronRight size={15} />
+          </summary>
+          <dl>
+            <dt>Last Gemini success</dt>
+            <dd>
+              {health.lastSuccessUptimeS
+                ? `Device uptime ${health.lastSuccessUptimeS}s`
+                : "None this boot"}
+            </dd>
+            <dt>Free heap</dt>
+            <dd>{Math.round(health.freeHeap / 1024)} KiB</dd>
+          </dl>
+        </details>
+      )}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
   );
 }

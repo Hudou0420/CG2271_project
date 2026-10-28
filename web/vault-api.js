@@ -14,11 +14,11 @@ import {
   onValue,
   onChildAdded,
   query,
-  orderByKey,
   orderByChild,
   limitToLast,
   ref,
   push,
+  set,
   serverTimestamp,
   connectDatabaseEmulator,
 } from "firebase/database";
@@ -123,7 +123,7 @@ export async function connectVault(config, { emulator = false } = {}) {
   }
   function onEvents(cb, { limit = 100, onError = () => {} } = {}) {
     return onChildAdded(
-      query(ref(db, "vault/events"), orderByKey(), limitToLast(limit)),
+      query(ref(db, "vault/events"), orderByChild("at"), limitToLast(limit)),
       (snap) => cb({ id: snap.key, ...snap.val() }),
       onError,
     );
@@ -132,7 +132,7 @@ export async function connectVault(config, { emulator = false } = {}) {
   // cannot replay celebrations/sounds when a spectator opens the page.
   function onEventHistory(cb, onError = () => {}) {
     return onValue(
-      query(ref(db, "vault/events"), orderByKey(), limitToLast(200)),
+      query(ref(db, "vault/events"), orderByChild("at"), limitToLast(200)),
       (snap) => {
         const events = [];
         snap.forEach((child) => {
@@ -159,6 +159,58 @@ export async function connectVault(config, { emulator = false } = {}) {
       },
       onError,
     );
+  }
+  function onAiMessage(cb, onError = () => {}) {
+    return onValue(
+      ref(db, "vault/aiMessage"),
+      (snap) => cb(snap.val()),
+      onError,
+    );
+  }
+  function onAiOwner(cb, onError = () => {}) {
+    let enabled = true,
+      health = null,
+      loaded = false;
+    const emit = () => cb({ enabled, health, loaded });
+    const stops = [
+      onValue(
+        ref(db, "vault/aiSettings/enabled"),
+        (snap) => {
+          enabled = snap.val() !== false;
+          loaded = true;
+          emit();
+        },
+        onError,
+      ),
+      onValue(
+        ref(db, "vault/aiStatus"),
+        (snap) => {
+          health = snap.val();
+          emit();
+        },
+        onError,
+      ),
+    ];
+    return () => stops.forEach((stop) => stop());
+  }
+  async function setAiEnabled(enabled) {
+    if (!owner || !auth.currentUser) throw new Error("Owner access required.");
+    if (!connected) throw new Error("The database connection is offline.");
+    // Checkboxes use the server subscription, never an optimistic local value.
+    let timer;
+    try {
+      await Promise.race([
+        set(ref(db, "vault/aiSettings/enabled"), !!enabled),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Setting update timed out.")),
+            10000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
   async function sendCommand(command, { onUpdate, timeoutMs = 10000 } = {}) {
     if (!owner || !auth.currentUser)
@@ -238,6 +290,9 @@ export async function connectVault(config, { emulator = false } = {}) {
   }
   return {
     onStatus,
+    onAiMessage,
+    onAiOwner,
+    setAiEnabled,
     onEvents,
     onEventHistory,
     onLeaderboard,

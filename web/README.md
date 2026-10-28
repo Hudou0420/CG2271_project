@@ -206,3 +206,150 @@ Player names and historical submitted guesses are public on this shared game
 screen. The current secret code is private in the pending command queue and is
 removed when the ESP32 consumes it. Anyone with owner credentials can operate
 the vault; Firebase roles, not hidden buttons, enforce this distinction.
+
+## Gemini game master
+
+The ESP32 calls Gemini directly. Firebase carries reactions and owner settings;
+there is no server or Cloud Function to deploy. The MCU still controls unlocking.
+
+### Setup and deployment
+
+1. Create a key in [Google AI Studio](https://aistudio.google.com/api-keys), using
+   a project **without paid billing**. Confirm free-tier access to
+   `gemini-2.5-flash-lite`. Quotas and model availability vary; check Google's
+   [pricing](https://ai.google.dev/gemini-api/docs/pricing) and your active limits.
+2. Add these definitions to `../Project_Secrets/secrets.h`, relative to `Project/`:
+
+   ```cpp
+   #define GEMINI_API_KEY "your-key"
+   #define GEMINI_MODEL "gemini-2.5-flash-lite"
+   ```
+
+   Keep the Wi-Fi and Firebase definitions. Placeholders are also in
+   `esp32/include/secrets.example.h`. Never put the Gemini key in browser config,
+   a `VITE_*` variable or Firebase. If the default model is unavailable, select a
+   model your project lists as free and change `GEMINI_MODEL`.
+3. Publish the rules **before uploading firmware**, from `Project/web/`:
+
+   ```sh
+   npx firebase deploy --only database
+   ```
+
+4. Build and upload using your real external configuration, from `Project/esp32/`:
+
+   ```sh
+   pio run -t upload
+   pio device monitor
+   ```
+
+5. Build and publish the dashboard, from `Project/web/`:
+
+   ```sh
+   npm run build
+   npx firebase deploy --only hosting
+   ```
+
+6. Sign in to the owner panel and check **Game master**. Disarm and arm a fresh
+   round. AI starts enabled. The owner's saved toggle reaches the device on its
+   next settings poll, about three seconds when connected. Without a Gemini key,
+   local reactions and scheduled useful hints still work.
+
+Trigger an alarm or complete a wrong guess for the first live check. A **Local**
+reaction appears first; it changes to **Gemini** if an accepted reply arrives
+before the next action. Owner diagnostics explain fallbacks. Space test events
+at least 15 seconds apart. A physical three-wrong-guess test needs working knock
+detection; use the host tests while that hardware issue is pending. Check free
+heap in owner AI diagnostics while Firebase and Gemini are both active on the
+board. Static build RAM figures do not measure the peak heap used by a TLS handshake.
+
+### Behavior and limits
+
+Wrong guesses, alarms and solves trigger short reactions. Every third wrong guess
+gets one locally computed higher/lower clue, rotating among incorrect positions.
+This clue remains available when Gemini fails. Other reactions carry no intentional
+clues. Disabling the game master removes reactions and hints; ordinary dashboard
+guidance remains.
+
+Messages clear on the first observed knock, entry into dialing, round changes or
+alarm recovery. Round/event IDs and action revisions prevent late replies and
+page refreshes from reviving old reactions. The bubble labels its current source.
+
+Gemini receives the active code, event details, closeness and up to 16 recent
+guesses. It does not receive player names or Wi-Fi/Firebase credentials. Its
+reaction is limited to ten English words and checked for numbers and apparent
+clue language. Firmware appends the permitted directional clue. These checks
+cannot prove that arbitrary generated prose contains no indirect clue. Invalid
+output uses a local reaction.
+
+Useful hints need a confirmed dashboard arm. A UART ACK alone does not establish
+acceptance: a fresh post-ACK status must show LOCKED with zero attempts, following
+IDLE/UNLOCKED or an observable attempt-counter reset. Re-arming an untouched LOCKED
+round is ambiguous, so hints stay paused; disarm then arm to restore them. ESP32
+reboots, console/raw commands and an offline MCU invalidate code context. Basic
+reactions continue until the next confirmed dashboard arm. Disarm, solve and
+replacement arms clear the active code held in RAM.
+
+Gemini uses the existing Arduino background loop and a verified TLS client, a one-item pending queue,
+eight-second connection/read timeouts, a bounded response body and at least 15
+seconds between requests. Events are never automatically retried. Quota errors
+start a one-minute cooldown, doubling up to ten minutes. Invalid keys/models pause
+requests for ten minutes. Low heap skips a request. There is no paid fallback;
+keep billing disabled for strictly free operation.
+
+On the ESP32-S2, Firebase, token refresh and Gemini share a mutex so only one TLS
+session can allocate handshake/buffer memory at a time. Firebase closes its TLS
+connection after each request. Gemini waits until its local reaction, source event
+and current status have been published, then requests the TLS lease and rechecks
+free heap and the largest available block. If the lease or memory is unavailable,
+it keeps the local fallback. Firebase requests can briefly wait during a Gemini
+call; the MCU game, UART and IMU tasks remain independent. The existing Arduino
+loop has a 12 KiB stack instead of 8 KiB, saving 8 KiB overall compared with a
+separate 12 KiB AI task. USB debug commands are processed between AI jobs;
+Firebase owner controls run in their own task.
+
+### Database additions
+
+| Path | Access | Purpose |
+| --- | --- | --- |
+| `/vault/aiMessage` | Public read, device write | Current reaction, source, round/event IDs, action revision and timestamp |
+| `/vault/aiSettings/enabled` | Owner read/write, device read | Persistent switch; missing means enabled |
+| `/vault/aiStatus` | Owner read, device write | Sanitized health, code-context availability, cooldown, last success uptime and free heap |
+
+Status and game events gain additive `roundId` and `actionRevision` fields.
+AI-triggering events use stable IDs and idempotent writes. Event subscriptions
+query by indexed `at` timestamps to include recent events across device boots.
+The new paths never contain codes, prompts, keys or raw provider errors. Existing
+private ARM commands still carry the code as before.
+
+### Checks
+
+After installing PlatformIO dependencies, run from `Project/`:
+
+```sh
+python3 -m unittest discover -s tests -p 'test_*.py'
+```
+
+This uses `g++` (or the compiler command in `CXX`) with AddressSanitizer and
+UndefinedBehaviorSanitizer. It tests the production policy, mocked Gemini replies,
+backoff, hints, bounded history, publication ordering and round invalidation.
+A host FreeRTOS shim also checks that competing HTTPS clients never overlap
+and that leases are released on timeouts and scope exits, without credentials or
+network calls. The existing web test commands also check reaction lifetime,
+desktop/phone layouts, owner toggles and Firebase permissions:
+
+```sh
+npm test
+npm run test:rules
+npm run test:browser
+npm run test:live
+```
+
+Firebase status, owner commands, event delivery and AI settings get fair turns on
+one client. A failed event keeps its queue position and retries after two seconds,
+while status and command processing continue. Retried event/score writes use
+stable keys to avoid duplicate records after an uncertain response. Every request
+uses a fresh verified TLS connection and releases its buffers before the next
+client can start. Serial output includes numeric HTTP/TLS errors and available
+heap, never
+credentials. `live status published` confirms the first successful status write;
+`database requests recovered` confirms a request succeeded after an error.

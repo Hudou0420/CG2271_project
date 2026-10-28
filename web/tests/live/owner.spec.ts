@@ -204,3 +204,103 @@ test("a missing acknowledgement times out once and never resends the command", a
   expect(Object.keys(await read("vault/commands")).length).toBe(1);
   await expect(page.getByLabel("Secret code", { exact: true })).toHaveValue("");
 });
+
+for (const width of [1280, 390]) {
+  test(`game master reactions expire across actions and reloads at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 850 });
+    const reaction = {
+      roundId: "r",
+      eventId: "attempt",
+      actionRevision: 3,
+      message: "Bold choice. Middle digit: go higher.",
+      source: "local",
+      at: Date.now(),
+    };
+    await write(
+      "vault/status",
+      liveStatus("LOCKED", { roundId: "r", actionRevision: 3, attempts: 3 }),
+    );
+    await write("vault/events/attempt", {
+      type: "attempt",
+      roundId: "r",
+      actionRevision: 3,
+      attempt: 3,
+      guess: "123",
+      at: Date.now(),
+    });
+    await write("vault/aiMessage", reaction);
+    await page.goto("/");
+    const bubble = page.locator(".speech-bubble");
+    await expect(bubble).toContainText(reaction.message);
+    await expect(bubble.locator(".ai-source")).toHaveText("Local");
+    await write("vault/aiMessage", {
+      ...reaction,
+      source: "gemini",
+      message: "A little ambitious. Middle digit: go higher.",
+    });
+    await expect(bubble.locator(".ai-source")).toHaveText("Gemini");
+    await write(
+      "vault/status",
+      liveStatus("LOCKED", {
+        roundId: "r",
+        actionRevision: 4,
+        knocks: 1,
+        attempts: 3,
+      }),
+    );
+    await expect(bubble.locator(".ai-source")).toHaveCount(0);
+    await page.reload();
+    await expect(bubble.locator(".ai-source")).toHaveCount(0);
+    // An old response arriving after a new action must remain hidden.
+    await write(
+      "vault/status",
+      liveStatus("LOCKED", { roundId: "r", actionRevision: 4, attempts: 3 }),
+    );
+    await write("vault/aiMessage", reaction);
+    await expect(bubble).not.toContainText(reaction.message);
+    await write(
+      "vault/status",
+      liveStatus("LOCKED", { roundId: "next-round", actionRevision: 3 }),
+    );
+    await page.reload();
+    await expect(bubble.locator(".ai-source")).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  });
+}
+
+test("owner controls persist the AI setting and show private health", async ({
+  page,
+}) => {
+  await write("vault/aiStatus", {
+    enabled: true,
+    configured: true,
+    hasCode: false,
+    health: "quota-cooldown",
+    cooldownSeconds: 60,
+    lastSuccessUptimeS: 123,
+    freeHeap: 100000,
+    updatedAt: Date.now(),
+  });
+  await page.goto("/");
+  await expect(page.getByLabel("Enable reactions and hints")).toHaveCount(0);
+  await page.getByRole("button", { name: "Owner access" }).click();
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const toggle = page.getByLabel("Enable reactions and hints");
+  await expect(toggle).toBeChecked();
+  await expect(
+    page.getByText("Free quota reached. Using local reactions."),
+  ).toBeVisible();
+  await toggle.uncheck();
+  await expect.poll(() => read("vault/aiSettings/enabled")).toBe(false);
+  await expect(page.getByText("Game master is off.")).toBeVisible();
+  await write("vault/aiSettings/enabled", true);
+  await expect(toggle).toBeChecked();
+});

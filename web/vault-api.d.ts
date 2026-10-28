@@ -1,6 +1,12 @@
 import type { FirebaseApp, FirebaseOptions } from "firebase/app";
 import type { User } from "firebase/auth";
-import type { Status, GameEvent, Score } from "./src/model";
+import type {
+  Status,
+  GameEvent,
+  Score,
+  AiMessage,
+  AiHealth,
+} from "./src/model";
 export const OFFLINE_AFTER_MS: number;
 export const STATES: string[];
 export interface CommandOptions {
@@ -13,6 +19,19 @@ export interface CommandResult {
   id: string | null;
 }
 export interface VaultApi {
+  onAiMessage(
+    cb: (message: AiMessage | null) => void,
+    onError?: (error: unknown) => void,
+  ): () => void;
+  onAiOwner(
+    cb: (state: {
+      enabled: boolean;
+      loaded: boolean;
+      health: AiHealth | null;
+    }) => void,
+    onError?: (error: unknown) => void,
+  ): () => void;
+  setAiEnabled(enabled: boolean): Promise<void>;
   onStatus(
     cb: (status: Status) => void,
     onError?: (error: unknown) => void,

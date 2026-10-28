@@ -167,3 +167,67 @@ describe("public viewing and private controls", () => {
     await assertFails(get(ref(db("team"), "access/owners")));
   });
 });
+
+describe("game master permissions", () => {
+  const message = {
+    roundId: "round",
+    eventId: "event",
+    actionRevision: 3,
+    message: "Still locked.",
+    source: "local",
+    at: 1,
+  };
+  const health = {
+    enabled: true,
+    configured: true,
+    hasCode: false,
+    health: "ready",
+    cooldownSeconds: 0,
+    lastSuccessUptimeS: 1,
+    freeHeap: 100000,
+    updatedAt: 1,
+  };
+  it("publishes reactions publicly, but keeps health and settings private", async () => {
+    await assertSucceeds(set(ref(db("esp"), "vault/aiMessage"), message));
+    await assertSucceeds(get(ref(db(), "vault/aiMessage")));
+    await assertSucceeds(set(ref(db("esp"), "vault/aiStatus"), health));
+    await assertSucceeds(get(ref(db("team"), "vault/aiStatus")));
+    for (const uid of [undefined, "stranger"]) {
+      await assertFails(get(ref(db(uid), "vault/aiStatus")));
+      await assertFails(get(ref(db(uid), "vault/aiSettings")));
+      await assertFails(set(ref(db(uid), "vault/aiMessage"), message));
+      await assertFails(set(ref(db(uid), "vault/aiSettings/enabled"), false));
+    }
+    await assertFails(set(ref(db("team"), "vault/aiMessage"), message));
+    await assertFails(set(ref(db("team"), "vault/aiStatus"), health));
+  });
+  it("allows only owners to toggle a boolean; the device may read the setting", async () => {
+    await assertSucceeds(
+      set(ref(db("team"), "vault/aiSettings/enabled"), false),
+    );
+    await assertSucceeds(get(ref(db("esp"), "vault/aiSettings/enabled")));
+    await assertFails(set(ref(db("esp"), "vault/aiSettings/enabled"), true));
+    await assertFails(set(ref(db("team"), "vault/aiSettings/enabled"), "true"));
+    await assertFails(set(ref(db("team"), "vault/aiSettings/key"), "secret"));
+  });
+  it("rejects extra secret fields, oversized messages and arbitrary health errors", async () => {
+    for (const value of [
+      { ...message, code: "042" },
+      { ...message, apiKey: "secret" },
+      { ...message, source: "other" },
+      { ...message, message: "x".repeat(192) },
+      { ...message, actionRevision: -1 },
+    ])
+      await assertFails(set(ref(db("esp"), "vault/aiMessage"), value));
+    await assertFails(
+      set(ref(db("esp"), "vault/aiStatus"), { ...health, prompt: "secret" }),
+    );
+    await assertFails(
+      set(ref(db("esp"), "vault/aiStatus"), {
+        ...health,
+        health: "raw provider error",
+      }),
+    );
+    await assertSucceeds(remove(ref(db("esp"), "vault/aiMessage")));
+  });
+});

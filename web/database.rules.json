@@ -3,8 +3,16 @@
     ".read": false,
     ".write": false,
     "access": {
-      "owners": { "$uid": { ".read": "auth != null && auth.uid === $uid" } },
-      "devices": { "$uid": { ".read": "auth != null && auth.uid === $uid" } }
+      "owners": {
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid"
+        }
+      },
+      "devices": {
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid"
+        }
+      }
     },
     "vault": {
       "status": {
@@ -14,14 +22,17 @@
         "state": {
           ".validate": "newData.isString() && newData.val().matches(/^(IDLE|LOCKED|DIALING|UNLOCKED|ALARM|UNKNOWN)$/)"
         },
-        "updatedAt": { ".validate": "newData.isNumber()" }
+        "updatedAt": {
+          ".validate": "newData.isNumber()"
+        }
       },
       "events": {
         ".read": true,
         ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
         "$id": {
           ".validate": "newData.hasChildren(['type','at']) && newData.child('type').isString() && newData.child('at').isNumber() && !newData.hasChild('code')"
-        }
+        },
+        ".indexOn": ["at"]
       },
       "leaderboard": {
         ".read": true,
@@ -38,8 +49,12 @@
           "attempts": {
             ".validate": "newData.isNumber() && newData.val() >= 0"
           },
-          "at": { ".validate": "newData.isNumber()" },
-          "$other": { ".validate": false }
+          "at": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
         }
       },
       "commands": {
@@ -63,7 +78,9 @@
           "at": {
             ".validate": "newData.isNumber() && newData.val() >= now - 60000 && newData.val() <= now + 5000"
           },
-          "$other": { ".validate": false }
+          "$other": {
+            ".validate": false
+          }
         }
       },
       "commandResults": {
@@ -71,6 +88,74 @@
         ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
         "$id": {
           ".validate": "newData.hasChild('result') && newData.child('result').isString() && !newData.hasChild('code')"
+        }
+      },
+      "aiMessage": {
+        ".read": true,
+        ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
+        ".validate": "newData.hasChildren(['roundId','eventId','actionRevision','message','source','at'])",
+        "roundId": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 32"
+        },
+        "eventId": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 48"
+        },
+        "actionRevision": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 === 0"
+        },
+        "message": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 191"
+        },
+        "source": {
+          ".validate": "newData.val() === 'local' || newData.val() === 'gemini'"
+        },
+        "at": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      },
+      "aiSettings": {
+        ".read": "auth != null && (root.child('access/owners').child(auth.uid).val() === true || root.child('access/devices').child(auth.uid).val() === true)",
+        "enabled": {
+          ".write": "auth != null && root.child('access/owners').child(auth.uid).val() === true",
+          ".validate": "newData.isBoolean()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      },
+      "aiStatus": {
+        ".read": "auth != null && root.child('access/owners').child(auth.uid).val() === true",
+        ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
+        ".validate": "newData.hasChildren(['enabled','configured','hasCode','health','cooldownSeconds','lastSuccessUptimeS','freeHeap','updatedAt'])",
+        "enabled": {
+          ".validate": "newData.isBoolean()"
+        },
+        "configured": {
+          ".validate": "newData.isBoolean()"
+        },
+        "hasCode": {
+          ".validate": "newData.isBoolean()"
+        },
+        "health": {
+          ".validate": "newData.isString() && newData.val().matches(/^(rate-limited|waiting-settings|not-configured|requesting|ready|offline|quota-cooldown|key-rejected|model-unavailable|invalid-response|network-timeout|low-memory|worker-unavailable|unavailable)$/)"
+        },
+        "cooldownSeconds": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "lastSuccessUptimeS": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "freeHeap": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "updatedAt": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "$other": {
+          ".validate": false
         }
       }
     }

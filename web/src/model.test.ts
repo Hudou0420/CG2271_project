@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  visibleAiMessage,
   canControl,
   formatTime,
   rankScores,
@@ -70,5 +71,64 @@ describe("round recovery and public game display", () => {
     expect(canControl({ ...live, mcuOnline: false }, false, true)).toBe(false);
     expect(canControl({ ...live, state: "ALARM" }, false, true)).toBe(false);
     expect(canControl({ ...live, state: "DIALING" }, false, true)).toBe(false);
+  });
+});
+
+describe("game master message lifetime", () => {
+  const status = {
+    state: "LOCKED" as const,
+    espOnline: true,
+    mcuOnline: true,
+    roundId: "r",
+    actionRevision: 3,
+    knocks: 0,
+  };
+  const message = {
+    roundId: "r",
+    eventId: "e",
+    actionRevision: 3,
+    message: "Still locked.",
+    source: "gemini" as const,
+    at: 100,
+  };
+  const source = [
+    { id: "e", type: "attempt", roundId: "r", actionRevision: 3, at: 99 },
+  ];
+  it("shows the matching reaction, including after refresh", () => {
+    expect(visibleAiMessage(message, status, source)).toEqual(message);
+    expect(
+      visibleAiMessage({ ...message, source: "local" }, status, source)?.source,
+    ).toBe("local");
+  });
+  it("rejects previous rounds, later actions, missing source events and offline status", () => {
+    for (const s of [
+      { ...status, roundId: "new" },
+      { ...status, actionRevision: 4 },
+      { ...status, mcuOnline: false },
+      { ...status, espOnline: false },
+      { ...status, knocks: 1 },
+      { ...status, state: "DIALING" as const },
+      { ...status, state: "IDLE" as const },
+    ])
+      expect(visibleAiMessage(message, s, source)).toBeNull();
+    expect(visibleAiMessage(message, status, [])).toBeNull();
+    expect(
+      visibleAiMessage(message, status, [{ ...source[0], actionRevision: 2 }]),
+    ).toBeNull();
+  });
+  it("matches alarm and solve reactions only to their respective states", () => {
+    expect(
+      visibleAiMessage(message, { ...status, state: "ALARM" }, [
+        { ...source[0], type: "alarm" },
+      ]),
+    ).toEqual(message);
+    expect(
+      visibleAiMessage(message, { ...status, state: "UNLOCKED" }, [
+        { ...source[0], type: "solved" },
+      ]),
+    ).toEqual(message);
+    expect(
+      visibleAiMessage(message, status, [{ ...source[0], type: "solved" }]),
+    ).toBeNull();
   });
 });

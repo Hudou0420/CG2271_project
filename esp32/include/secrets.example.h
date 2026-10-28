@@ -21,3 +21,8 @@
 // Keep these credentials in the external secrets.h, never in browser config.
 #define FIREBASE_DEVICE_EMAIL ""
 #define FIREBASE_DEVICE_PASSWORD ""
+
+// Google AI Studio -> create an API key in a project WITHOUT paid billing.
+// Free-tier availability/quotas vary. Never put this key in VITE_* variables.
+#define GEMINI_API_KEY ""
+#define GEMINI_MODEL "gemini-2.5-flash-lite"

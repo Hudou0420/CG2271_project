@@ -1,15 +1,16 @@
 // cloud.cpp - web dashboard link over Firebase Realtime Database (REST).
 //
-// tCloud (lowest priority) owns Wi-Fi and HTTPS, so a slow network can never
-// delay tLink or tImu. Each pass it does at most one of, in this order:
-//   1. send the oldest queued item (game event, command result), retrying it
-//      until the database accepts it,
-//   2. publish /vault/status when it changed (or as a heartbeat),
-//   3. poll /vault/commands for arm/disarm requests from the dashboard.
-// HTTPS certificates are checked against the core's built-in CA bundle, and
-// one keep-alive connection to the database is reused between requests.
+// tCloud owns Firebase HTTPS; Arduino loop owns Gemini HTTPS. Status, commands,
+// queued events and AI data get fair turns on the database client. Event
+// retries retain their progress without blocking status or owner controls.
+// Certificates are verified using the core's built-in CA bundle. All HTTPS
+// clients share a lease; Firebase closes TLS after each request to leave room
+// for Gemini and token refreshes without overlapping TLS heaps.
 // Database layout: web/README.md.
 #include "cloud.h"
+#include "https_guard.h"
+#include "cloud_schedule.h"
+#include "ai.h"
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -50,6 +51,8 @@ struct CloudItem {
     vp_frame_t frame;
     uint8_t    type;
     bool       ok;
+    AiTag      ai;
+    uint32_t   serial; // unique link-transition ID, stable across HTTP retries
 };
 
 enum ItemResult { ITEM_DONE, ITEM_RETRY };
@@ -67,10 +70,12 @@ struct Published {
     vp_state_t state;
     bool       mcuOnline;
     McuSensors sensors;
+    AiTag      ai;
 };
 
-static NetworkClientSecure s_tls; // keep-alive connection to the database
+static NetworkClientSecure s_tls; // context reused; TLS buffers released after every request
 static HTTPClient          s_http;
+static bool                s_transportFailed;
 static String              s_idToken;
 static String              s_refreshToken;
 static uint32_t            s_tokenExpiresMs;
@@ -89,6 +94,8 @@ static uint32_t s_lastPollMs;
 static uint32_t s_lastStatusMs;
 static Published s_published;
 static bool      s_publishedOnce;
+static AiTag     s_writtenReaction;
+static char      s_writtenEvent[48];
 
 static void set_error(const char *fmt, ...)
 {
@@ -147,10 +154,15 @@ static String url_segment(const String &s)
 static bool auth_post(const String &url, const char *contentType, const String &body,
                       JsonDocument &out)
 {
+    HttpsLease lease;
+    if (!lease.acquired()) { set_error("HTTPS memory guard unavailable"); return false; }
+    // The previous database request released its TLS buffers before this lease.
     NetworkClientSecure tls;
     HTTPClient          http;
 
     tls.useBuiltinCACertBundle();
+    tls.setHandshakeTimeout(8);
+    http.setReuse(false);
     http.setConnectTimeout(CLOUD_HTTP_TIMEOUT_MS);
     http.setTimeout(CLOUD_HTTP_TIMEOUT_MS);
     if (!http.begin(tls, url)) {
@@ -161,6 +173,7 @@ static bool auth_post(const String &url, const char *contentType, const String &
     int    code = http.POST(body);
     String resp = code > 0 ? http.getString() : String();
     http.end();
+    tls.stop();
     count_request(code == 200, code);
 
     if (code != 200) {
@@ -257,6 +270,8 @@ static bool ensure_signed_in()
 static int db_request(const char *method, const String &path, const String &query,
                       const String &body, String *reply = nullptr)
 {
+    HttpsLease lease;
+    if (!lease.acquired()) { set_error("HTTPS memory guard unavailable"); return -1; }
     String url = String(FIREBASE_DB_URL) + CLOUD_ROOT + path + ".json";
     String q   = query;
     if (s_idToken.length() > 0) {
@@ -266,6 +281,8 @@ static int db_request(const char *method, const String &path, const String &quer
         url += "?" + q;
     }
 
+    s_http.setReuse(false);
+    s_tls.stop();
     if (!s_http.begin(s_tls, url)) {
         set_error("bad database URL, check FIREBASE_DB_URL");
         return -1;
@@ -274,14 +291,21 @@ static int db_request(const char *method, const String &path, const String &quer
         s_http.addHeader("Content-Type", "application/json");
     }
     int    code = s_http.sendRequest(method, body);
+    char tlsReason[96] = {};
+    int tlsError = code <= 0 ? s_tls.lastError(tlsReason, sizeof(tlsReason)) : 0;
     String resp = code > 0 ? s_http.getString() : String();
     s_http.end();
+    s_tls.stop(); // release the TLS heap before another client can acquire the lease
 
     bool ok = code == 200;
     count_request(ok, code);
     if (!ok) {
         if (code <= 0) {
-            s_tls.stop(); // reconnect from scratch next time
+            s_transportFailed = true;
+            Serial.printf("[cloud] transport HTTP=%d TLS=%d %s heap=%lu maxBlock=%lu minHeap=%lu\n",
+                          code, tlsError, tlsError ? tlsReason : "",
+                          (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap(),
+                          (unsigned long)ESP.getMinFreeHeap());
             set_error("%s %s: %s", method, path.c_str(), HTTPClient::errorToString(code).c_str());
         } else {
             if (code == 401) {
@@ -289,6 +313,10 @@ static int db_request(const char *method, const String &path, const String &quer
             }
             set_error("%s %s: HTTP %d %s", method, path.c_str(), code, resp.substring(0, 24).c_str());
         }
+    }
+    if (ok && s_transportFailed) {
+        Serial.println("[cloud] database requests recovered (fresh TLS connections)");
+        s_transportFailed = false;
     }
     if (reply != nullptr) {
         *reply = resp;
@@ -311,7 +339,18 @@ static int write_json(const char *method, const String &path, JsonDocument &doc,
         doc[timeField][".sv"] = "timestamp"; // filled in by the server
     }
     serializeJson(doc, body);
-    return db_request(method, path, "", body);
+    int code = db_request(method, path, "", body);
+    if (code == 200 && path.startsWith("/events/")) {
+        const char *type = doc["type"] | "";
+        if (!strcmp(type, "attempt") || !strcmp(type, "alarm") || !strcmp(type, "solved"))
+            strlcpy(s_writtenEvent, path.c_str() + 8, sizeof(s_writtenEvent));
+    }
+    if (code == 200 && path == "/aiMessage") {
+        strlcpy(s_writtenReaction.roundId, doc["roundId"] | "", sizeof(s_writtenReaction.roundId));
+        strlcpy(s_writtenReaction.eventId, doc["eventId"] | "", sizeof(s_writtenReaction.eventId));
+        s_writtenReaction.actionRevision = doc["actionRevision"] | 0U;
+    }
+    return code;
 }
 
 // One sub-request of a multi-request item. Skips steps already done on an
@@ -326,10 +365,12 @@ static int write_json(const char *method, const String &path, JsonDocument &doc,
 
 // ---- Queue items -> database writes ------------------------------------------------
 
-static ItemResult send_frame(const vp_frame_t &f, uint8_t &step)
+static ItemResult send_frame(const vp_frame_t &f, const AiTag &tag, uint8_t &step)
 {
     const uint8_t *p = f.payload;
     JsonDocument   ev;
+    ev["roundId"] = tag.roundId;
+    ev["actionRevision"] = tag.actionRevision;
 
     switch (f.type) {
     case VP_ATTEMPT: {
@@ -338,7 +379,7 @@ static ItemResult send_frame(const vp_frame_t &f, uint8_t &step)
         ev["guess"]     = guess;
         ev["attempt"]   = p[3];
         ev["closeness"] = p[4];
-        ITEM_STEP(0, write_json("POST", "/events", ev, "at"));
+        ITEM_STEP(0, write_json("PUT", String("/events/") + tag.eventId, ev, "at"));
         break;
     }
     case VP_SOLVED: {
@@ -350,14 +391,14 @@ static ItemResult send_frame(const vp_frame_t &f, uint8_t &step)
         ev["player"]      = s_roundPlayer;
         ev["attempts"]    = p[0];
         ev["seconds"]     = vp_get_u16(&p[1]);
-        ITEM_STEP(0, write_json("POST", "/leaderboard", entry, "at"));
-        ITEM_STEP(1, write_json("POST", "/events", ev, "at"));
+        ITEM_STEP(0, write_json("PUT", String("/leaderboard/") + tag.eventId, entry, "at"));
+        ITEM_STEP(1, write_json("PUT", String("/events/") + tag.eventId, ev, "at"));
         break;
     }
     case VP_ALARM:
         ev["type"]  = "alarm";
         ev["cause"] = p[0] == VP_CAUSE_TAMPER ? "tamper" : "beam";
-        ITEM_STEP(0, write_json("POST", "/events", ev, "at"));
+        ITEM_STEP(0, write_json("PUT", String("/events/") + tag.eventId, ev, "at"));
         break;
     default:
         break;
@@ -365,7 +406,7 @@ static ItemResult send_frame(const vp_frame_t &f, uint8_t &step)
     return ITEM_DONE;
 }
 
-static ItemResult send_delivered(uint8_t type, bool ok, uint8_t &step)
+static ItemResult send_delivered(uint8_t type, bool ok, const AiTag &tag, uint8_t &step)
 {
     int     slot = type == VP_ARM ? 0 : 1;
     String &key  = s_awaitKey[slot];
@@ -385,11 +426,13 @@ static ItemResult send_delivered(uint8_t type, bool ok, uint8_t &step)
     }
     if (ok) {
         JsonDocument ev;
+        ev["roundId"] = tag.roundId;
+        ev["actionRevision"] = tag.actionRevision;
         ev["type"] = type == VP_ARM ? "armed" : "disarmed";
         if (type == VP_ARM) {
             ev["player"] = s_roundPlayer; // never the code: every dashboard user can read events
         }
-        ITEM_STEP(1, write_json("POST", "/events", ev, "at"));
+        ITEM_STEP(1, write_json("PUT", String("/events/") + tag.roundId + (type == VP_ARM ? "-armed" : "-disarmed"), ev, "at"));
     }
     key = "";
     return ITEM_DONE;
@@ -399,13 +442,13 @@ static ItemResult send_item(const CloudItem &item, uint8_t &step)
 {
     switch (item.kind) {
     case ITEM_FRAME:
-        return send_frame(item.frame, step);
+        return send_frame(item.frame, item.ai, step);
     case ITEM_DELIVERED:
-        return send_delivered(item.type, item.ok, step);
+        return send_delivered(item.type, item.ok, item.ai, step);
     case ITEM_MCU_LINK: {
         JsonDocument ev;
         ev["type"] = item.ok ? "mcu_online" : "mcu_offline";
-        ITEM_STEP(0, write_json("POST", "/events", ev, "at"));
+        ITEM_STEP(0, write_json("PUT", String("/events/") + item.ai.roundId + "-link-" + String(item.serial), ev, "at"));
         return ITEM_DONE;
     }
     }
@@ -417,7 +460,7 @@ static ItemResult send_item(const CloudItem &item, uint8_t &step)
 static Published snapshot()
 {
     VaultState vs = state_get();
-    return {vs.stateKnown, vs.mcuState, state_mcu_online(), vs.sensors};
+    return {vs.stateKnown, vs.mcuState, state_mcu_online(), vs.sensors, ai_snapshot().tag};
 }
 
 // What the dashboard shows; raw encoder steps and event counts are left out.
@@ -425,7 +468,8 @@ static bool status_changed(const Published &a, const Published &b)
 {
     const McuSensors &x = a.sensors;
     const McuSensors &y = b.sensors;
-    return a.known != b.known || a.state != b.state || a.mcuOnline != b.mcuOnline ||
+    return strcmp(a.ai.roundId, b.ai.roundId) != 0 || a.ai.actionRevision != b.ai.actionRevision ||
+           a.known != b.known || a.state != b.state || a.mcuOnline != b.mcuOnline ||
            x.digitIndex != y.digitIndex || x.currentDigit != y.currentDigit ||
            x.knocks != y.knocks || x.attempts != y.attempts || x.closeness != y.closeness ||
            x.flags != y.flags || abs((int)x.light - (int)y.light) >= CLOUD_LIGHT_DELTA;
@@ -445,6 +489,8 @@ static bool publish_status(const Published &now)
     const McuSensors &s = now.sensors;
     JsonDocument      doc;
 
+    doc["roundId"]       = now.ai.roundId;
+    doc["actionRevision"] = now.ai.actionRevision;
     doc["state"]         = now.known ? state_name(now.state) : "UNKNOWN";
     doc["mcuOnline"]     = now.mcuOnline;
     doc["digitsEntered"] = s.digitIndex;
@@ -462,6 +508,11 @@ static bool publish_status(const Published &now)
     s_lastStatusMs = millis(); // also after a failure: don't hammer the database
     if (code != 200) {
         return false;
+    }
+    if (!s_publishedOnce) {
+        Serial.printf("[cloud] live status published; heap=%lu maxBlock=%lu minHeap=%lu\n",
+                      (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap(),
+                      (unsigned long)ESP.getMinFreeHeap());
     }
     s_published     = now;
     s_publishedOnce = true;
@@ -501,10 +552,20 @@ static String run_command(const String &key, JsonObjectConst cmd)
         return "rejected: MCU offline";
     }
 
+    if (s_awaitKey[0].length() || s_awaitKey[1].length()) {
+        return "rejected: another command is awaiting delivery";
+    }
+    VaultState actual = state_get();
+    if (!actual.stateKnown || !actual.lastStatusMs ||
+        actual.mcuState == VP_STATE_DIALING || actual.mcuState == VP_STATE_ALARM) {
+        return "rejected: vault is not ready for commands";
+    }
+
     if (strcmp(action, "disarm") == 0) {
         if (!link_send(VP_DISARM, nullptr, 0)) {
             return "rejected: link busy";
         }
+        ai_cancel_context();
         s_awaitKey[1] = key;
         Serial.println("[cloud] dashboard: disarm");
         return "sent";
@@ -527,7 +588,9 @@ static String run_command(const String &key, JsonObjectConst cmd)
         player = player.substring(0, CLOUD_PLAYER_MAX);
     }
 
+    ai_prepare_arm(payload, actual.mcuState, actual.sensors.attempts);
     if (!link_send(VP_ARM, payload, sizeof(payload))) {
+        ai_cancel_context();
         return "rejected: link busy";
     }
     s_awaitKey[0] = key;
@@ -636,27 +699,77 @@ static bool wifi_ready()
 static void track_mcu_link()
 {
     static bool wasOnline;
+    static uint32_t transition;
     bool        online = state_mcu_online();
 
     if (online != wasOnline) {
         wasOnline      = online;
+        if (!online) ai_link_lost();
         CloudItem item = {};
         item.kind      = ITEM_MCU_LINK;
+        item.ai        = ai_snapshot().tag;
+        item.serial    = ++transition;
         item.ok        = online;
         xQueueSend(s_queue, &item, 0);
+    }
+}
+
+// Only this task reads/writes Firebase. AI snapshots contain no secret material.
+static void sync_ai()
+{
+    static uint32_t lastSettings, lastPublish, lastHealth, publishedVersion;
+    static bool loaded;
+    if (lastSettings == 0 || millis() - lastSettings >= 3000) {
+        lastSettings = millis();
+        String reply;
+        if (db_request("GET", "/aiSettings/enabled", "", "", &reply) == 200 &&
+            (reply == "true" || reply == "false" || reply == "null")) {
+            ai_enabled(reply != "false");
+            loaded = true;
+        }
+    }
+    if (!loaded || millis() - lastPublish < 1000) return;
+    lastPublish = millis();
+    AiSnapshot ai = ai_snapshot();
+    if (ai.version == publishedVersion && ai.cooldownSeconds == 0 && millis() - lastHealth < 10000) return;
+    JsonDocument msg;
+    if (ai.enabled && ai.reaction.message[0]) {
+        msg["roundId"] = ai.reaction.tag.roundId;
+        msg["eventId"] = ai.reaction.tag.eventId;
+        msg["actionRevision"] = ai.reaction.tag.actionRevision;
+        msg["message"] = ai.reaction.message;
+        msg["source"] = ai.reaction.gemini ? "gemini" : "local";
+    }
+    int code = msg.isNull() ? db_request("DELETE", "/aiMessage", "", "") :
+                             write_json("PUT", "/aiMessage", msg, "at");
+    if (code != 200) return;
+    JsonDocument health;
+    health["enabled"] = ai.enabled;
+    health["configured"] = ai.configured;
+    health["hasCode"] = ai.hasCode;
+    health["health"] = ai.health;
+    health["cooldownSeconds"] = ai.cooldownSeconds;
+    health["lastSuccessUptimeS"] = ai.lastSuccessUptimeS;
+    health["freeHeap"] = ai.freeHeap;
+    if (write_json("PUT", "/aiStatus", health, "updatedAt") == 200) {
+        publishedVersion = ai.version;
+        lastHealth = millis();
     }
 }
 
 static void cloud_task(void *)
 {
     bool staleCleared = false;
+    CloudSchedule schedule;
+    uint32_t eventRetryAt = 0, lastAiSyncMs = 0;
 
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     s_wifiBeginMs = millis();
     s_tls.useBuiltinCACertBundle();
-    s_http.setReuse(true);
+    s_tls.setHandshakeTimeout(8);
+    s_http.setReuse(false);
     s_http.setConnectTimeout(CLOUD_HTTP_TIMEOUT_MS);
     s_http.setTimeout(CLOUD_HTTP_TIMEOUT_MS);
 
@@ -681,32 +794,46 @@ static void cloud_task(void *)
                 continue;
             }
             staleCleared = true;
-            Serial.println("[cloud] connected to the database");
-        }
-
-        if (haveItem) {
-            if (send_item(item, s_itemStep) == ITEM_DONE) {
-                xQueueReceive(s_queue, &item, 0);
-                s_itemStep = 0;
-            } else {
-                back_off();
-            }
-            continue;
+            Serial.println("[cloud] database authenticated; publishing live status");
         }
 
         Published now = snapshot();
-        if (status_due(now)) {
-            if (!publish_status(now)) {
-                back_off();
-            }
-            continue;
-        }
-
-        if (millis() - s_lastPollMs >= CLOUD_COMMAND_POLL_MS) {
+        uint32_t clockMs = millis();
+        const bool ready[] = {
+            status_due(now),
+            clockMs - s_lastPollMs >= CLOUD_COMMAND_POLL_MS,
+            haveItem && cloud_due(clockMs, eventRetryAt),
+            clockMs - lastAiSyncMs >= 1000,
+        };
+        switch (schedule.next(ready)) {
+        case CLOUD_STATUS:
+            // publish_status spaces its own retries; other work still gets a turn.
+            publish_status(now);
+            break;
+        case CLOUD_COMMANDS:
+            poll_commands(); // never re-send a command after uncertain delivery
             s_lastPollMs = millis();
-            if (!poll_commands()) {
-                back_off();
+            break;
+        case CLOUD_EVENTS:
+            if (send_item(item, s_itemStep) == ITEM_DONE) {
+                xQueueReceive(s_queue, &item, 0);
+                s_itemStep = 0;
+                eventRetryAt = millis();
+            } else {
+                eventRetryAt = millis() + CLOUD_RETRY_MS;
             }
+            break;
+        case CLOUD_AI:
+            sync_ai();
+            lastAiSyncMs = millis();
+            break;
+        case CLOUD_WAIT:
+            break;
+        }
+        AiSnapshot ai = ai_snapshot();
+        if (s_publishedOnce && ai.enabled && ai.reaction.message[0] &&
+            ai_publication_ready(ai.reaction.tag, s_writtenReaction, s_published.ai, s_writtenEvent)) {
+            ai_published(ai.reaction.tag);
         }
     }
 }
@@ -749,12 +876,15 @@ CloudStats cloud_stats()
 
 void cloud_on_message(const vp_frame_t &frame)
 {
+    AiTag tag{};
+    ai_frame(frame, tag);
     if (frame.type != VP_ATTEMPT && frame.type != VP_SOLVED && frame.type != VP_ALARM) {
         return;
     }
     CloudItem item = {};
     item.kind      = ITEM_FRAME;
     item.frame     = frame;
+    item.ai        = tag;
     enqueue(item);
 }
 
@@ -763,8 +893,10 @@ void cloud_on_delivered(uint8_t type, bool ok)
     if (type != VP_ARM && type != VP_DISARM) {
         return;
     }
+    ai_delivery(type, ok);
     CloudItem item = {};
     item.kind      = ITEM_DELIVERED;
+    item.ai        = ai_snapshot().tag;
     item.type      = type;
     item.ok        = ok;
     enqueue(item);

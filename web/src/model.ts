@@ -1,5 +1,10 @@
 export type State =
-  "IDLE" | "LOCKED" | "DIALING" | "UNLOCKED" | "ALARM" | "UNKNOWN";
+  | "IDLE"
+  | "LOCKED"
+  | "DIALING"
+  | "UNLOCKED"
+  | "ALARM"
+  | "UNKNOWN";
 export interface Status {
   state: State;
   espOnline: boolean;
@@ -14,8 +19,27 @@ export interface Status {
   lightValid?: boolean;
   beamEnabled?: boolean;
   inputsReady?: boolean;
+  roundId?: string;
+  actionRevision?: number;
   updatedAt?: number;
   uptimeS?: number;
+}
+export interface AiMessage {
+  roundId: string;
+  eventId: string;
+  actionRevision: number;
+  message: string;
+  source: "gemini" | "local";
+  at: number;
+}
+export interface AiHealth {
+  configured: boolean;
+  hasCode: boolean;
+  health: string;
+  cooldownSeconds: number;
+  lastSuccessUptimeS: number;
+  freeHeap: number;
+  updatedAt: number;
 }
 export interface GameEvent {
   id: string;
@@ -28,6 +52,8 @@ export interface GameEvent {
   seconds?: number;
   attempts?: number;
   cause?: string;
+  roundId?: string;
+  actionRevision?: number;
 }
 export interface Score {
   id: string;
@@ -153,4 +179,42 @@ export function randomCode() {
     crypto.getRandomValues(sample);
   } while (sample[0] >= 4294967000);
   return String(sample[0] % 1000).padStart(3, "0");
+}
+
+// Both streams must agree. A refresh must never revive a previous attempt's reply.
+export function visibleAiMessage(
+  message: AiMessage | null,
+  status: Status,
+  events: GameEvent[],
+) {
+  if (
+    !message ||
+    !status.espOnline ||
+    !status.mcuOnline ||
+    status.state === "IDLE" ||
+    status.state === "UNKNOWN" ||
+    status.state === "DIALING" ||
+    (status.knocks ?? 0) > 0 ||
+    message.roundId !== status.roundId ||
+    message.actionRevision !== status.actionRevision ||
+    !["gemini", "local"].includes(message.source) ||
+    typeof message.message !== "string" ||
+    message.message.length > 191
+  )
+    return null;
+  const source = events.find(
+    (e) =>
+      e.id === message.eventId &&
+      e.roundId === message.roundId &&
+      e.actionRevision === message.actionRevision,
+  );
+  const expected =
+    source?.type === "attempt"
+      ? "LOCKED"
+      : source?.type === "alarm"
+        ? "ALARM"
+        : source?.type === "solved"
+          ? "UNLOCKED"
+          : null;
+  return expected === status.state ? message : null;
 }

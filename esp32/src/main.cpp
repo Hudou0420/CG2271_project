@@ -1,10 +1,12 @@
+#include "ai.h"
+#include "https_guard.h"
 // main.cpp - The Vault, ESP32 side.
 //
 // Tasks:
 //   tLink  (prio 3)  UART link to the MCXC444: parse, ACK/NAK, retransmit
 //   tImu   (prio 2)  MPU-6050 at 20 Hz -> TAMPER while armed
 //   tCloud (prio 1)  Wi-Fi + Firebase: status, events, dashboard commands
-//   loop() (prio 1)  debug console on the USB serial monitor
+//   loop() (prio 1)  debug console + Gemini, sharing one existing task stack
 #include <Arduino.h>
 
 #include "cloud.h"
@@ -12,6 +14,9 @@
 #include "imu.h"
 #include "link.h"
 #include "vault_state.h"
+
+// TLS needs the same stack budget as tCloud, without a dedicated AI task.
+SET_LOOP_TASK_STACK_SIZE(12288);
 
 // ---- Messages from the MCU (runs in tLink, keep it short) ------------------
 
@@ -211,8 +216,10 @@ static void handle_command(char *line)
             (uint8_t)(code[0] - '0'), (uint8_t)(code[1] - '0'),
             (uint8_t)(code[2] - '0'),
             (uint8_t)(pattern ? atoi(pattern) : 0)};
+        ai_cancel_context();
         link_send(VP_ARM, payload, sizeof(payload));
     } else if (strcmp(cmd, "disarm") == 0) {
+        ai_cancel_context();
         link_send(VP_DISARM, nullptr, 0);
     } else if (strcmp(cmd, "tamper") == 0) {
         uint8_t payload[VP_LEN_TAMPER];
@@ -231,6 +238,7 @@ static void handle_command(char *line)
         while ((b = strtok_r(nullptr, " ", &save)) != nullptr && len < VP_MAX_PAYLOAD) {
             payload[len++] = (uint8_t)strtoul(b, nullptr, 16);
         }
+        ai_cancel_context();
         link_send(type, payload, len);
     } else if (strcmp(cmd, "imu") == 0) {
         imuStream = !imuStream;
@@ -285,6 +293,8 @@ void setup()
     delay(500);
     Serial.println("\n=== The Vault - ESP32 ===");
 
+    https_guard_init();
+    ai_init();
     state_init();
     link_init(on_message, on_delivered);
     imu_init();
@@ -299,5 +309,6 @@ void setup()
 void loop()
 {
     poll_console();
+    ai_poll();
     vTaskDelay(pdMS_TO_TICKS(10));
 }

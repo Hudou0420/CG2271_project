@@ -1,6 +1,6 @@
 // cloud.h - link to the web dashboard through Firebase Realtime Database.
 //
-// One task (tCloud) owns Wi-Fi and HTTPS. It publishes the vault status,
+// One task (tCloud) owns Wi-Fi and Firebase HTTPS; Arduino loop owns Gemini HTTPS. It publishes the vault status,
 // appends game events and leaderboard entries, and polls for arm/disarm
 // commands written by the dashboard. The database layout is in web/README.md.
 // The other tasks only call the cloud_on_*() hooks, which never block.
