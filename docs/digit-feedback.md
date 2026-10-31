@@ -8,7 +8,7 @@ Submitted guesses in **Close calls.** now use per-digit results computed by the 
 
 For code `123`, guess `215` is blue/blue/red, and `125` is green/green/red. Repeated digits follow Wordle counting: exact matches consume occurrences first, then unmatched guesses consume remaining occurrences from left to right. For code `123`, guess `221` is red/green/blue because the only `2` is already matched in the middle.
 
-Live entry stays neutral until a complete guess is submitted. The existing percentage and heat bar still describe overall closeness. Old guesses without per-digit results display neutral tiles; historical results are not inferred from the percentage.
+Live entry stays neutral until a complete guess is submitted. Recent guesses show only per-digit results; the numerical closeness labels, percentage and heat bar have been removed from the dashboard. Old guesses without per-digit results display neutral tiles; historical results are not inferred from the closeness score.
 
 The MCU computes the results while creating the attempt packet. ATTEMPT now carries eight bytes: the existing three guessed digits, attempt number, closeness, then three feedback bytes. Feedback values are `0` absent, `1` present elsewhere, and `2` correct position. The ESP32 publishes these as a three-character `feedback` string on the existing attempt event. The secret code is not added to the packet or public event. Database rules validate the optional field and continue to permit older events without it.
 

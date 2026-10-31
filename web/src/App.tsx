@@ -35,7 +35,6 @@ import { LiveDigitTiles, GuessTiles } from "./components/DigitTiles";
 import { CONFIG_KEY, getConfig, parseFirebaseConfig } from "./config";
 import {
   visibleAiMessage,
-  attemptFeedback,
   type AiMessage,
   type AiHealth,
   canControl,
@@ -161,6 +160,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const commandInFlight = useRef(false);
   const [sound, setSound] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [previewState, setPreviewState] = useState<State>(
@@ -263,6 +263,7 @@ export default function App() {
     ) {
       clearTimeout(command.timer);
       pending.current = null;
+      commandInFlight.current = false;
       setBusy(false);
       setNotice(
         command.expected === "LOCKED"
@@ -309,7 +310,9 @@ export default function App() {
   const top = scores.slice(0, 3);
 
   async function command(action: "arm" | "disarm", code = "", player = "") {
-    if (!api || !canControl(statusRef.current, busy, owner)) return;
+    if (!api || !canControl(statusRef.current, commandInFlight.current, owner))
+      return;
+    commandInFlight.current = true;
     setBusy(true);
     setError("");
     setNotice("Sending to the vault…");
@@ -322,6 +325,7 @@ export default function App() {
           ? await api.arm(code, { player, onUpdate })
           : await api.disarm({ onUpdate });
       if (!result.ok) {
+        commandInFlight.current = false;
         setBusy(false);
         setNotice(result.result);
         return;
@@ -339,12 +343,14 @@ export default function App() {
             ? "Round armed. Ready for the first knock."
             : "Vault is on standby.",
         );
+        commandInFlight.current = false;
         setBusy(false);
         return;
       }
       setNotice("Command delivered. Waiting for the state to update…");
       const timer = setTimeout(() => {
         pending.current = null;
+        commandInFlight.current = false;
         setBusy(false);
         setNotice(
           "Delivered, but the state wasn’t confirmed. Check the vault before trying again.",
@@ -353,6 +359,7 @@ export default function App() {
       pending.current = { expected, after, timer };
     } catch (e) {
       setError(errorText(e));
+      commandInFlight.current = false;
       setBusy(false);
       setNotice("");
     }
@@ -666,30 +673,14 @@ export default function App() {
               </p>
               {attempts.length ? (
                 <ol className="attempt-list">
-                  {attempts.slice(0, 4).map((e) => {
-                    const heat = attemptFeedback(e.closeness);
-                    return (
-                      <li key={e.id}>
-                        <span className="attempt-index">
-                          #{String(e.attempt || 0).padStart(2, "0")}
-                        </span>
-                        <GuessTiles guess={e.guess} closeness={e.closeness} feedback={e.feedback} />
-                        <div className="heat-score">
-                          <span>
-                            {heat.band.toUpperCase()}{" "}
-                            <b>{heat.score}%</b>
-                          </span>
-                          <i>
-                            <i
-                              style={{
-                                width: `${heat.score}%`,
-                              }}
-                            />
-                          </i>
-                        </div>
-                      </li>
-                    );
-                  })}
+                  {attempts.slice(0, 4).map((e) => (
+                    <li key={e.id}>
+                      <span className="attempt-index">
+                        #{String(e.attempt || 0).padStart(2, "0")}
+                      </span>
+                      <GuessTiles guess={e.guess} feedback={e.feedback} />
+                    </li>
+                  ))}
                 </ol>
               ) : (
                 <div className="empty-attempts">

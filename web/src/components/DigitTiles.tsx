@@ -1,5 +1,5 @@
 import { Check } from "lucide-react";
-import { attemptFeedback, combinationTiles, guessDigits, submittedFeedback, type State } from "../model";
+import { combinationTiles, guessDigits, submittedFeedback, type State } from "../model";
 
 export function LiveDigitTiles({ state, entered, dial }: {
   state: State; entered: unknown; dial: unknown;
@@ -19,18 +19,17 @@ export function LiveDigitTiles({ state, entered, dial }: {
   );
 }
 
-export function GuessTiles({ guess, closeness, feedback }: {
-  guess: unknown; closeness: unknown; feedback: unknown;
+export function GuessTiles({ guess, feedback }: {
+  guess: unknown; feedback: unknown;
 }) {
   const digits = guessDigits(guess);
   const marks = digits ? submittedFeedback(feedback) : null;
-  const { band, score } = attemptFeedback(closeness);
   const description = digits && marks
     ? digits.map((digit, index) => `${digit}: ${marks[index] === "correct" ? "correct position" : marks[index] === "present" ? "present elsewhere" : "absent"}`).join("; ")
     : "Per-digit feedback unavailable.";
   return (
     <div className={digits ? "guess-tiles" : "guess-tiles unavailable"}
-      role="group" aria-label={`Guess ${digits ? digits.join("") : "unavailable"}, ${band}, ${score}% closeness`}
+      role="group" aria-label={`Guess ${digits ? digits.join("") : "unavailable"}`}
       aria-description={description}>
       {(digits || ["—", "—", "—"]).map((digit, index) => (
         <span key={index} className={marks ? `feedback-${marks[index]}` : "feedback-unknown"} aria-hidden="true">{digit}</span>

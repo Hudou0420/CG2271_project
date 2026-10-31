@@ -35,14 +35,15 @@ test("shows masked digit progress, current digit, recent guesses and full rankin
 }) => {
   await page.goto("/?preview=1&state=DIALING");
   await expect(page.getByLabel("1 of 3 digits confirmed")).toBeVisible();
-  await expect(page.getByRole("group", { name: "Guess 428, cool, 67% closeness", exact: true })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Guess 428", exact: true })).toBeVisible();
   await expect(page.locator(".digit-slots > span")).toHaveText(["•", "7", ""]);
   await expect(page.locator(".digit-slots > .solved")).toHaveCount(0);
-  const latest = page.getByRole("group", { name: "Guess 735, warm, 85% closeness", exact: true });
+  const latest = page.getByRole("group", { name: "Guess 735", exact: true });
   await expect(latest.locator("span")).toHaveText(["7", "3", "5"]);
   await expect(latest.locator(".feedback-present")).toHaveText("7");
   await expect(latest.locator(".feedback-correct")).toHaveText("3");
   await expect(latest.locator(".feedback-absent")).toHaveText("5");
+  await expect(page.locator(".attempts-panel")).not.toContainText(/warm|cool|cold|\d+%/i);
   await page.getByRole("button", { name: "The full leaderboard" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(

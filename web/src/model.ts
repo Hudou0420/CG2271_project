@@ -220,12 +220,6 @@ export function visibleAiMessage(
   return expected === status.state ? message : null;
 }
 
-export function attemptFeedback(closeness: unknown) {
-  const score = typeof closeness === "number" && Number.isFinite(closeness)
-    ? Math.max(0, Math.min(100, closeness)) : 0;
-  return { score, band: score >= 70 ? "warm" : score >= 40 ? "cool" : "cold" };
-}
-
 export function guessDigits(guess: unknown) {
   return typeof guess === "string" && /^[0-9]{3}$/.test(guess)
     ? guess.split("") : null;

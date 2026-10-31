@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   visibleAiMessage,
-  attemptFeedback,
   guessDigits,
   combinationTiles,
   submittedFeedback,
@@ -165,15 +164,6 @@ describe("untrusted snapshots and timer boundaries", () => {
 
 
 describe("digit tiles", () => {
-  it("uses the existing whole-guess closeness boundaries", () => {
-    expect([0, 39, 40, 69, 70, 100].map(score => attemptFeedback(score).band))
-      .toEqual(["cold", "cold", "cool", "cool", "warm", "warm"]);
-    expect(attemptFeedback(-1).score).toBe(0);
-    expect(attemptFeedback(101).score).toBe(100);
-    for (const value of [undefined, null, "70", NaN, Infinity]) {
-      expect(attemptFeedback(value)).toEqual({ score: 0, band: "cold" });
-    }
-  });
   it("preserves leading zeroes and rejects incomplete or malformed guesses", () => {
     expect(guessDigits("007")).toEqual(["0", "0", "7"]);
     for (const value of [undefined, null, 7, "7", "12", "1234", "1x3", "123\n"]) {

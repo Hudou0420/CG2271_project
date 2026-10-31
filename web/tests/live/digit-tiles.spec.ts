@@ -24,19 +24,19 @@ test("submitted guesses show per-digit verdicts, preserve zeroes and keep legacy
     },
   });
   await page.goto("/");
-  await expect(page.getByRole("group", { name: "Guess 007, cold, 39% closeness", exact: true }).locator("span")).toHaveText(["0", "0", "7"]);
-  const firstExample = page.getByRole("group", { name: "Guess 215, warm, 86% closeness", exact: true });
+  await expect(page.getByRole("group", { name: "Guess 007", exact: true }).locator("span")).toHaveText(["0", "0", "7"]);
+  const firstExample = page.getByRole("group", { name: "Guess 215", exact: true });
   await expect(firstExample.locator("span")).toHaveClass(["feedback-present", "feedback-present", "feedback-absent"]);
   await expect(firstExample).toHaveAttribute("aria-description", "2: present elsewhere; 1: present elsewhere; 5: absent");
-  const secondExample = page.getByRole("group", { name: "Guess 125, warm, 93% closeness", exact: true });
+  const secondExample = page.getByRole("group", { name: "Guess 125", exact: true });
   await expect(secondExample.locator("span")).toHaveClass(["feedback-correct", "feedback-correct", "feedback-absent"]);
-  const repeated = page.getByRole("group", { name: "Guess 221, warm, 89% closeness", exact: true });
+  const repeated = page.getByRole("group", { name: "Guess 221", exact: true });
   await expect(repeated.locator("span")).toHaveClass(["feedback-absent", "feedback-correct", "feedback-present"]);
-  await expect(page.getByRole("group", { name: "Guess 007, cold, 39% closeness", exact: true }).locator(".feedback-unknown")).toHaveCount(3);
+  await expect(page.getByRole("group", { name: "Guess 007", exact: true }).locator(".feedback-unknown")).toHaveCount(3);
   await write("vault/events/e", { type: "attempt", guess: "bad!", feedback: "220", closeness: 85, attempt: 5, at: now - 1000 });
   await expect(page.locator(".guess-tiles.unavailable > span")).toHaveText(["—", "—", "—"]);
   await expect(page.locator(".guess-tiles")).toHaveCount(4);
-  await expect(page.getByRole("group", { name: "Guess 007, cold, 39% closeness", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "Guess 007", exact: true })).toHaveCount(0);
   await write("vault/events/f", { type: "attempt", attempt: 6, at: now });
   await expect(page.locator(".guess-tiles.unavailable")).toHaveCount(2);
 });

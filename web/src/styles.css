@@ -797,32 +797,6 @@ h1 > span {
   background: #2c603e;
   border-color: #92cd9c;
 }
-.heat-score {
-  margin-left: auto;
-  min-width: 77px;
-}
-.heat-score > span {
-  display: flex;
-  justify-content: space-between;
-  gap: 9px;
-  font: 7px var(--mono);
-  color: #a4af95;
-}
-.heat-score b {
-  color: var(--orange);
-  font-weight: 400;
-}
-.heat-score > i {
-  display: block;
-  height: 3px;
-  background: #46503a;
-  margin-top: 7px;
-}
-.heat-score > i > i {
-  height: 100%;
-  background: var(--orange);
-  display: block;
-}
 .rail-note {
   border-top: 1px solid #3d4733;
   display: flex;
@@ -1415,9 +1389,6 @@ footer button:hover {
   .attempt-list li {
     gap: 10px;
   }
-  .heat-score {
-    min-width: 65px;
-  }
   .score-time {
     font-size: 12px;
   }
@@ -1557,9 +1528,6 @@ footer button:hover {
   .attempt-list li {
     flex-wrap: wrap;
     gap: 10px;
-  }
-  .heat-score {
-    min-width: 60px;
   }
   footer > span:nth-child(2) {
     display: none;
@@ -1782,9 +1750,6 @@ footer button:hover {
   }
   .score-time {
     font-size: 14px;
-  }
-  .heat-score {
-    min-width: 95px;
   }
   .attempt-list li {
     flex-wrap: nowrap;
