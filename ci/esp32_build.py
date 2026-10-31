@@ -47,7 +47,15 @@ print(result.stdout)
 result.check_returncode()
 # Confirm the linker wrapper is present and actually called in the linked image.
 packages = Path(os.environ.get('PLATFORMIO_CORE_DIR', str(Path.home() / '.platformio'))) / 'packages'
-objdump = next(packages.glob('toolchain-xtensa-esp32s2/bin/*-objdump'))
+objdump_patterns = (
+    'toolchain-xtensa-esp-elf/bin/*-objdump',
+    'toolchain-xtensa-esp32s2/bin/*-objdump',
+)
+objdump = next((tool for pattern in objdump_patterns
+                for tool in sorted(packages.glob(pattern)) if tool.is_file()), None)
+if objdump is None:
+    sys.exit(f'ESP32 objdump tool not found in {packages}; searched: '
+             + ', '.join(objdump_patterns))
 elf = output / 'build/esp32s2/firmware.elf'
 disassembly = subprocess.check_output([str(objdump), '-d', str(elf)], text=True)
 assert args.profile == 'offline' or '<__wrap_esp_wifi_init>' in disassembly, 'Wi-Fi memory wrapper missing'
