@@ -62,6 +62,26 @@ uint8_t vault_closeness(const uint8_t code[CODE_LEN], const uint8_t guess[CODE_L
     return (uint8_t)(100 - (dist * 100) / max_dist);
 }
 
+void vault_digit_feedback(const uint8_t code[CODE_LEN], const uint8_t guess[CODE_LEN],
+                          uint8_t feedback[CODE_LEN])
+{
+    bool used[CODE_LEN] = {false};
+    for (int i = 0; i < CODE_LEN; ++i) {
+        feedback[i] = code[i] == guess[i] ? DIGIT_CORRECT : DIGIT_ABSENT;
+        used[i] = feedback[i] == DIGIT_CORRECT;
+    }
+    for (int i = 0; i < CODE_LEN; ++i) {
+        if (feedback[i] == DIGIT_CORRECT) continue;
+        for (int j = 0; j < CODE_LEN; ++j) {
+            if (!used[j] && guess[i] == code[j]) {
+                feedback[i] = DIGIT_PRESENT;
+                used[j] = true;
+                break;
+            }
+        }
+    }
+}
+
 void vault_make_packet(const GameState *g, uint8_t pkt_type, TxMsg *out)
 {
     memset(out, 0, sizeof(*out));
@@ -69,12 +89,13 @@ void vault_make_packet(const GameState *g, uint8_t pkt_type, TxMsg *out)
 
     switch (pkt_type) {
     case PKT_ATTEMPT:
-        out->len = 5;
+        out->len = 8;
         out->payload[0] = g->guess[0];
         out->payload[1] = g->guess[1];
         out->payload[2] = g->guess[2];
         out->payload[3] = g->attempts;
         out->payload[4] = g->closeness;
+        vault_digit_feedback(g->code, g->guess, &out->payload[5]);
         break;
 
     case PKT_SOLVED:

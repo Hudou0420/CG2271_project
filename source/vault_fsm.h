@@ -20,6 +20,11 @@ bool vault_is_armed(const GameState *g);
 /* 100 = exact, 0 = as far away as possible. Used for the hint colour. */
 uint8_t vault_closeness(const uint8_t code[CODE_LEN], const uint8_t guess[CODE_LEN]);
 
+/* Wordle-style feedback: exact matches first, then unmatched occurrences.
+ * Output contains DIGIT_ABSENT / DIGIT_PRESENT / DIGIT_CORRECT, never code digits. */
+void vault_digit_feedback(const uint8_t code[CODE_LEN], const uint8_t guess[CODE_LEN],
+                          uint8_t feedback[CODE_LEN]);
+
 /* True if the knock timestamps match the secret rhythm (within tolerance). */
 bool vault_knock_matches(const uint32_t times[KNOCK_COUNT]);
 

@@ -31,9 +31,11 @@ import {
 } from "lucide-react";
 import { connectVault } from "../vault-api.js";
 import Vault from "./components/Vault";
+import { LiveDigitTiles, GuessTiles } from "./components/DigitTiles";
 import { CONFIG_KEY, getConfig, parseFirebaseConfig } from "./config";
 import {
   visibleAiMessage,
+  attemptFeedback,
   type AiMessage,
   type AiHealth,
   canControl,
@@ -536,34 +538,7 @@ export default function App() {
               </div>
               <div className="combination">
                 <span className="eyebrow">YOUR COMBINATION</span>
-                <div
-                  className="digit-slots"
-                  aria-label={`${state === "DIALING" ? status.digitsEntered || 0 : state === "UNLOCKED" ? 3 : 0} of 3 digits confirmed`}
-                >
-                  {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      className={
-                        state === "UNLOCKED" ||
-                        (state === "DIALING" && i < (status.digitsEntered || 0))
-                          ? "filled"
-                          : state === "DIALING" &&
-                              i === (status.digitsEntered || 0)
-                            ? "current"
-                            : ""
-                      }
-                    >
-                      {state === "UNLOCKED" ? (
-                        <Check size={18} />
-                      ) : state === "DIALING" &&
-                        i < (status.digitsEntered || 0) ? (
-                        "•"
-                      ) : (
-                        "—"
-                      )}
-                    </span>
-                  ))}
-                </div>
+                <LiveDigitTiles state={state} entered={status.digitsEntered} dial={status.dial} />
               </div>
               <div className="knock-progress">
                 <span className="eyebrow">SECRET KNOCK</span>
@@ -687,35 +662,34 @@ export default function App() {
                 <span className="count-pill">{attempts.length}</span>
               </div>
               <p className="section-description">
-                Your recent guesses. Warmer is closer.
+                Green: right spot. Blue: elsewhere. Red: absent.
               </p>
               {attempts.length ? (
                 <ol className="attempt-list">
-                  {attempts.slice(0, 4).map((e) => (
-                    <li key={e.id}>
-                      <span className="attempt-index">
-                        #{String(e.attempt || 0).padStart(2, "0")}
-                      </span>
-                      <strong className="guess">{e.guess}</strong>
-                      <div className="heat-score">
-                        <span>
-                          {(e.closeness || 0) >= 70
-                            ? "WARM"
-                            : (e.closeness || 0) >= 40
-                              ? "COOL"
-                              : "COLD"}{" "}
-                          <b>{e.closeness ?? 0}%</b>
+                  {attempts.slice(0, 4).map((e) => {
+                    const heat = attemptFeedback(e.closeness);
+                    return (
+                      <li key={e.id}>
+                        <span className="attempt-index">
+                          #{String(e.attempt || 0).padStart(2, "0")}
                         </span>
-                        <i>
-                          <i
-                            style={{
-                              width: `${Math.max(0, Math.min(100, e.closeness || 0))}%`,
-                            }}
-                          />
-                        </i>
-                      </div>
-                    </li>
-                  ))}
+                        <GuessTiles guess={e.guess} closeness={e.closeness} feedback={e.feedback} />
+                        <div className="heat-score">
+                          <span>
+                            {heat.band.toUpperCase()}{" "}
+                            <b>{heat.score}%</b>
+                          </span>
+                          <i>
+                            <i
+                              style={{
+                                width: `${heat.score}%`,
+                              }}
+                            />
+                          </i>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ol>
               ) : (
                 <div className="empty-attempts">

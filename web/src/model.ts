@@ -47,6 +47,7 @@ export interface GameEvent {
   at: number;
   player?: string;
   guess?: string;
+  feedback?: string;
   attempt?: number;
   closeness?: number;
   seconds?: number;
@@ -217,4 +218,41 @@ export function visibleAiMessage(
           ? "UNLOCKED"
           : null;
   return expected === status.state ? message : null;
+}
+
+export function attemptFeedback(closeness: unknown) {
+  const score = typeof closeness === "number" && Number.isFinite(closeness)
+    ? Math.max(0, Math.min(100, closeness)) : 0;
+  return { score, band: score >= 70 ? "warm" : score >= 40 ? "cool" : "cold" };
+}
+
+export function guessDigits(guess: unknown) {
+  return typeof guess === "string" && /^[0-9]{3}$/.test(guess)
+    ? guess.split("") : null;
+}
+
+export function combinationTiles(state: State, entered: unknown, dial: unknown) {
+  const confirmed = state === "UNLOCKED" ? 3 : state === "DIALING" &&
+    typeof entered === "number" && Number.isInteger(entered)
+    ? Math.max(0, Math.min(3, entered)) : 0;
+  const digit = typeof dial === "number" && Number.isInteger(dial) && dial >= 0 && dial <= 9
+    ? String(dial) : "—";
+  return {
+    confirmed,
+    tiles: [0, 1, 2].map(index => state === "UNLOCKED"
+      ? { kind: "solved", text: "" }
+      : index < confirmed
+        ? { kind: "filled", text: "•" }
+        : state === "DIALING" && index === confirmed
+          ? { kind: "current", text: digit }
+          : { kind: "empty", text: "" }),
+  };
+}
+
+
+export type DigitFeedback = "absent" | "present" | "correct";
+export function submittedFeedback(feedback: unknown): DigitFeedback[] | null {
+  if (typeof feedback !== "string" || !/^[012]{3}$/.test(feedback)) return null;
+  const meanings: DigitFeedback[] = ["absent", "present", "correct"];
+  return [...feedback].map(mark => meanings[Number(mark)]);
 }

@@ -523,22 +523,30 @@ h1 > span {
 }
 .digit-slots > span {
   width: 40px;
-  height: 39px;
-  border: 1px solid #566044;
+  height: 40px;
+  flex: 0 0 auto;
+  border: 2px solid #566044;
   display: grid;
   place-items: center;
-  color: #849071;
+  color: #c6cbbb;
   background: #2c3423;
-  border-radius: 3px;
-  font: 20px var(--mono);
+  border-radius: 2px;
+  font: 700 20px var(--mono);
+  transition: border-color 120ms ease, background-color 120ms ease;
 }
 .digit-slots > .filled {
-  color: var(--lime);
-  border-color: #7d973e;
+  color: var(--cream);
+  border-color: #8a9281;
+  background: #3b4135;
 }
 .digit-slots > .current {
   color: var(--cream);
-  border-bottom: 3px solid var(--lime);
+  border-color: var(--cream);
+  background: #42483b;
+}
+.digit-slots > .solved {
+  color: var(--lime);
+  border-color: #7d973e;
   background: #354027;
 }
 .knock-progress > div {
@@ -761,9 +769,33 @@ h1 > span {
   font: 8px var(--mono);
   color: #9ca98b;
 }
-.guess {
-  font: 700 19px var(--mono);
-  letter-spacing: 3px;
+.guess-tiles {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+.guess-tiles > span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 2px solid #7b8676;
+  border-radius: 2px;
+  background: #35402f;
+  color: #f5f3e8;
+  font: 700 16px var(--mono);
+}
+.guess-tiles > .feedback-absent {
+  background: #742f36;
+  border-color: #eb8d96;
+}
+.guess-tiles > .feedback-present {
+  background: #254e79;
+  border-color: #87b8ed;
+}
+.guess-tiles > .feedback-correct {
+  background: #2c603e;
+  border-color: #92cd9c;
 }
 .heat-score {
   margin-left: auto;
@@ -1347,7 +1379,7 @@ footer button:hover {
   }
   .digit-slots > span {
     width: 32px;
-    height: 35px;
+    height: 32px;
   }
   .game-console .eyebrow {
     font-size: 7px;
@@ -1379,10 +1411,6 @@ footer button:hover {
   }
   .section-description {
     font-size: 9px;
-  }
-  .guess {
-    font-size: 17px;
-    letter-spacing: 2px;
   }
   .attempt-list li {
     gap: 10px;
@@ -1696,7 +1724,7 @@ footer button:hover {
   }
   .digit-slots > span {
     width: 29px;
-    height: 33px;
+    height: 29px;
     font-size: 16px;
   }
   .knock-progress > div {
@@ -1755,9 +1783,6 @@ footer button:hover {
   .score-time {
     font-size: 14px;
   }
-  .guess {
-    font-size: 20px;
-  }
   .heat-score {
     min-width: 95px;
   }
@@ -1800,6 +1825,15 @@ footer button:hover {
   }
   .stage-instruction p {
     max-width: 245px;
+  }
+}
+@media (max-width: 360px) {
+  .brand {
+    font-size: 22px;
+    gap: 7px;
+  }
+  .site-header nav {
+    gap: 5px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

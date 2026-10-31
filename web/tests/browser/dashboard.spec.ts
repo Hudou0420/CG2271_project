@@ -35,7 +35,14 @@ test("shows masked digit progress, current digit, recent guesses and full rankin
 }) => {
   await page.goto("/?preview=1&state=DIALING");
   await expect(page.getByLabel("1 of 3 digits confirmed")).toBeVisible();
-  await expect(page.getByText("428", { exact: true })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Guess 428, cool, 67% closeness", exact: true })).toBeVisible();
+  await expect(page.locator(".digit-slots > span")).toHaveText(["•", "7", ""]);
+  await expect(page.locator(".digit-slots > .solved")).toHaveCount(0);
+  const latest = page.getByRole("group", { name: "Guess 735, warm, 85% closeness", exact: true });
+  await expect(latest.locator("span")).toHaveText(["7", "3", "5"]);
+  await expect(latest.locator(".feedback-present")).toHaveText("7");
+  await expect(latest.locator(".feedback-correct")).toHaveText("3");
+  await expect(latest.locator(".feedback-absent")).toHaveText("5");
   await page.getByRole("button", { name: "The full leaderboard" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(
@@ -101,3 +108,23 @@ test('connection form identifies a missing database URL in a Firebase console sn
   await expect(page.getByRole('alert')).toContainText('Missing databaseURL');
   await expect(page.getByRole('alert')).toContainText('Realtime Database');
 });
+
+for (const width of [320, 390, 1280]) {
+  test(`digit tiles remain square and fit at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/?preview=1&state=DIALING");
+    const tiles = page.locator(".digit-slots > span, .guess-tiles > span");
+    expect(await tiles.count()).toBe(9);
+    for (const tile of await tiles.all()) {
+      const bounds = await tile.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(Math.abs(bounds!.width - bounds!.height)).toBeLessThanOrEqual(1);
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.getByRole("combobox", { name: "Scene", exact: true }).selectOption("UNLOCKED");
+    await expect(page.locator(".digit-slots > .solved")).toHaveCount(3);
+  });
+}

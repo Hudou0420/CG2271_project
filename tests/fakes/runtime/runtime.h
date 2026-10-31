@@ -36,6 +36,7 @@ void test_runtime_reset(void);
 QueueHandle_t xQueueCreate(UBaseType_t capacity, UBaseType_t size);
 BaseType_t xQueueSend(QueueHandle_t queue, const void *item, TickType_t wait);
 BaseType_t xQueueSendToFront(QueueHandle_t queue, const void *item, TickType_t wait);
+BaseType_t xQueueReset(QueueHandle_t queue);
 BaseType_t xQueueOverwrite(QueueHandle_t queue, const void *item);
 BaseType_t xQueueSendFromISR(QueueHandle_t queue, const void *item, BaseType_t *woken);
 BaseType_t xQueueReceive(QueueHandle_t queue, void *item, TickType_t wait);

@@ -264,3 +264,23 @@ describe("atomic updates and role revocation", () => {
     await assertSucceeds(get(ref(db(), "vault/status")));
   });
 });
+
+
+describe("submitted digit feedback", () => {
+  const attempt = { type: "attempt", guess: "215", feedback: "110", closeness: 86, at: 1 };
+  it("allows the device to publish verdicts publicly without exposing the code", async () => {
+    await assertSucceeds(set(ref(db("esp"), "vault/events/feedback"), attempt));
+    await assertSucceeds(get(ref(db(), "vault/events/feedback")));
+    await assertFails(set(ref(db("team"), "vault/events/forged"), attempt));
+    await assertFails(set(ref(db(), "vault/events/forged"), attempt));
+    await assertSucceeds(set(ref(db("esp"), "vault/events/legacy"), { type: "attempt", guess: "007", at: 1 }));
+  });
+  it("rejects malformed verdicts, invalid guesses and code fields", async () => {
+    for (const feedback of ["11", "1111", "113", 110, [1, 1, 0]]) {
+      await assertFails(set(ref(db("esp"), "vault/events/bad"), { ...attempt, feedback }));
+    }
+    for (const patch of [{ guess: "21x" }, { type: "armed" }, { code: "123" }]) {
+      await assertFails(set(ref(db("esp"), "vault/events/bad"), { ...attempt, ...patch }));
+    }
+  });
+});

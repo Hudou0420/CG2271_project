@@ -145,7 +145,12 @@ static void handle_frame(const vp_frame_t &f)
     s_stats.rxFrames++;
 
     int want = expected_len(f.type);
-    if (want < 0 || f.len != want) {
+    bool legacyAttempt = f.type == VP_ATTEMPT && f.len == VP_LEN_ATTEMPT_LEGACY;
+    bool invalidFeedback = f.type == VP_ATTEMPT && f.len == VP_LEN_ATTEMPT &&
+        (f.payload[VP_ATTEMPT_FEEDBACK] > VP_DIGIT_CORRECT ||
+         f.payload[VP_ATTEMPT_FEEDBACK + 1] > VP_DIGIT_CORRECT ||
+         f.payload[VP_ATTEMPT_FEEDBACK + 2] > VP_DIGIT_CORRECT);
+    if (want < 0 || (f.len != want && !legacyAttempt) || invalidFeedback) {
         // Checksum passed but the content doesn't match our protocol
         // (usually the two sides disagree on the spec).
         s_stats.rxBad++;

@@ -35,6 +35,11 @@ BaseType_t xQueueSendToFront(QueueHandle_t queue,const void *item,TickType_t wai
     if(!q || q->count==q->capacity)return pdFALSE;
     memmove(q->data+q->size,q->data,q->count*q->size);memcpy(q->data,item,q->size);++q->count;return pdTRUE;
 }
+BaseType_t xQueueReset(QueueHandle_t queue) {
+    TestQueue *q=(TestQueue *)queue;
+    if(!q)return pdFALSE;
+    q->count=0;return pdTRUE;
+}
 BaseType_t xQueueOverwrite(QueueHandle_t queue,const void *item) {
     TestQueue *q=(TestQueue *)queue;if(!q)return pdFALSE;assert(q->capacity==1);
     memcpy(q->data,item,q->size);q->count=1;return pdTRUE;

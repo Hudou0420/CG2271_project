@@ -105,6 +105,10 @@ static int expected_len(uint8_t type)
     }
 }
 
+_Static_assert(DIGIT_ABSENT == VP_DIGIT_ABSENT && DIGIT_PRESENT == VP_DIGIT_PRESENT &&
+               DIGIT_CORRECT == VP_DIGIT_CORRECT && TX_MAX_PAYLOAD >= VP_LEN_ATTEMPT,
+               "Digit feedback must match the shared UART protocol");
+
 /* ---- ISR ------------------------------------------------------------------ */
 
 /* Only moves the byte into the queue; all parsing happens in tComms. */

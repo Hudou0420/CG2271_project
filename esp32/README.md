@@ -80,12 +80,14 @@ Connect **GPIO4 to GPIO5** with a jumper wire. The ESP32 then receives its own f
 
 - `arm 123` prints `received ARM`, the ESP32 ACKs its own frame, and then prints `ARM delivered`.
 - `send 13 01 00 00 00 00 00 00 00 00 00 00 00` makes the ESP32 receive a fake STATUS = LOCKED, so the vault counts as armed. Shaking the IMU then sends TAMPER.
-- `send 10 01 02 03 01 05` simulates an ATTEMPT from the MCU.
+- `send 10 02 01 05 01 56 01 01 00` simulates guess 215 with blue/blue/red feedback.
+  The legacy five-byte ATTEMPT format is also accepted without digit feedback.
 - Remove the jumper and run `arm 123`: after 3 retries the console prints `not acknowledged`, which shows retransmission works.
 
 ## Protocol
 
 The single source of truth is `../common/vault_protocol/vault_protocol.h`, which is plain C.
+See [digit feedback](../docs/digit-feedback.md) for colour meanings and the firmware/hosting rollout order.
 The MCXC444 project should compile the same `vault_protocol.c` and `vault_protocol.h` so both sides use the same message IDs and parser.
 
 ```
@@ -97,7 +99,7 @@ The MCXC444 project should compile the same `vault_protocol.c` and `vault_protoc
 | ARM | 0x01 | ESP → MCU | d0 d1 d2 pattern_id |
 | DISARM | 0x02 | ESP → MCU | none |
 | TAMPER | 0x03 | ESP → MCU | peak \|a\| in mg (u16 LE) |
-| ATTEMPT | 0x10 | MCU → ESP | d0 d1 d2 attempt_no closeness |
+| ATTEMPT | 0x10 | MCU → ESP | d0 d1 d2 attempt_no closeness feedback0 feedback1 feedback2 (8 B; legacy 5 B accepted) |
 | SOLVED | 0x11 | MCU → ESP | attempts, seconds (u16 LE) |
 | ALARM | 0x12 | MCU → ESP | cause (0 = beam, 1 = tamper) |
 | STATUS | 0x13 | MCU → ESP | 12 B: state (0 IDLE, 1 LOCKED, 2 DIALING, 3 UNLOCKED, 4 ALARM), digits entered, dial digit, knocks, attempts, closeness, light (u16 LE), encoder steps (i16 LE), sensor events, flags. See `VP_ST_*` |

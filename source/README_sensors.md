@@ -11,7 +11,7 @@ introduced by this service.
 Edit `source/vault_sensor_config.h`:
 
 ```c
-#define VAULT_ENCODER_STEPS_PER_ROUND 40
+#define VAULT_ENCODER_STEPS_PER_ROUND 4
 #define VAULT_ENCODER_DIRECTION       1
 #define VAULT_LDR_BEAM_DETECTION_ENABLED 0
 #define VAULT_LDR_BLOCKED_WHEN_LOW    1
@@ -20,12 +20,13 @@ Edit `source/vault_sensor_config.h`:
 #define VAULT_LDR_BLOCKED_SAMPLES     3U
 ```
 
-**40 is a provisional accepted-step count, not a measured calibration.**
+The default is 4 accepted half-cycle steps per digit change. This controls
+dial sensitivity; it is not a measured count for a physical revolution.
 The ADC threshold, polarity and hysteresis are also provisional. LDR polling
 is active, but beam-break event generation defaults OFF until the threshold
 and light/dark direction are measured. Set BEAM_DETECTION_ENABLED to 1 only
 after choosing those values. This service does not automatically power or
-align the laser. The remaining actuator stub does not provide beam readiness
+align the laser. The RGB/buzzer actuator service does not provide beam readiness
 or a laser/relay settling handshake yet.
 
 The tap defaults to a falling active edge with a pull-up and a 40 ms duplicate
@@ -43,7 +44,7 @@ states 00 and 11. The startup position is zero. The service computes:
 round_index = net_accepted_steps / VAULT_ENCODER_STEPS_PER_ROUND
 ```
 
-Division truncates toward zero. For a setting of 40:
+Division truncates toward zero. For an example setting of 40 (the default is 4):
 
 | Net steps | Round index | New event at this boundary |
 | --- | --- | --- |
@@ -146,10 +147,10 @@ issue. Example:
 [input] EV_PRESS value=+0 captured_ms=14000
 ```
 
-Without Person 3's ARM command, the game remains IDLE: events still reach
-tGame and can be logged, but the FSM intentionally ignores dial/knock input
-outside the applicable states. The remote communication and actuator tasks
-are still stubs; no UART implementation or output-pattern service was added.
+The game remains IDLE until an ARM command arrives from the ESP32. Events
+still reach tGame and can be logged, but the FSM ignores dial/knock input
+outside the applicable states. See [actuator feedback](../docs/actuators.md)
+and the root README for the merged output and UART services.
 
 ## Diagnostics and regression tests
 

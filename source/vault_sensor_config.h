@@ -5,7 +5,7 @@
  * are unchanged. Values marked provisional require physical measurements.
  */
 #ifndef VAULT_ENCODER_STEPS_PER_ROUND
-#define VAULT_ENCODER_STEPS_PER_ROUND 40 /* PROVISIONAL: accepted half-cycle steps. */
+#define VAULT_ENCODER_STEPS_PER_ROUND 15 /* Accepted half-cycle steps per digit change. */
 #endif
 #define VAULT_ENCODER_DIRECTION       1 /* Set -1 to reverse the reported sign. */
 #define VAULT_INPUT_TASK_PRIORITY     3

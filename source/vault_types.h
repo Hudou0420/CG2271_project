@@ -84,6 +84,13 @@ typedef struct {
     AlarmCause alarm_cause;
 } GameState;
 
+/* Per-digit submitted-guess feedback. Exact matches consume occurrences first. */
+typedef enum {
+    DIGIT_ABSENT = 0,
+    DIGIT_PRESENT = 1,
+    DIGIT_CORRECT = 2
+} DigitFeedback;
+
 /* ------------------------------------------------------------------ */
 /* What the FSM wants the caller (tGame) to do after an event.         */
 /* The FSM itself never touches queues or hardware.                    */
@@ -99,7 +106,7 @@ typedef struct {
 /* Outgoing packet request (tGame -> xUartTxQueue -> tComms)           */
 /* PLACEHOLDER type numbers: agree the real ones with Person 3.        */
 /* ------------------------------------------------------------------ */
-#define PKT_ATTEMPT   0x10  /* payload: g0 g1 g2 attempts closeness     */
+#define PKT_ATTEMPT   0x10  /* payload: g0 g1 g2 attempts closeness feedback[3] */
 #define PKT_SOLVED    0x11  /* payload: attempts time_hi time_lo        */
 #define PKT_ALARM     0x12  /* payload: cause                           */
 

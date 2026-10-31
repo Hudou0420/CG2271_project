@@ -4,8 +4,15 @@ from native_support import native, json_include, fixture_secrets
 
 
 class FirmwareTests(unittest.TestCase):
+    def test_mcu_actuator_feedback(self):
+        for led, buzzer in ((1, 1), (0, 0), (1, 0), (0, 1)):
+            with self.subTest(led=led, buzzer=buzzer):
+                native(f"actuators_led{led}_buzzer{buzzer}", ["tests/test_actuators.c", "tests/fakes/runtime/runtime.c", "source/vault_fsm.c"],
+                       includes=["tests/fakes/mcu", "tests/fakes/runtime", "source", "bsp"],
+                       defines=["VAULT_LED_ENABLED=" + str(led), "VAULT_BUZZER_ENABLED=" + str(buzzer)])
+
     def test_mcu_game_task_deadlines(self):
-        native("mcu_game_task", ["tests/test_mcu_game_task.c", "tests/fakes/runtime/runtime.c", "source/vault_fsm.c"],
+        native("mcu_game_task", ["tests/test_mcu_game_task.c", "tests/fakes/runtime/runtime.c", "tests/fakes/mcu/outputs.c", "source/vault_actuators.c", "source/vault_fsm.c"],
                includes=["tests/fakes/mcu", "tests/fakes/runtime", "source", "bsp"])
 
     def test_production_cloud_runtime(self):

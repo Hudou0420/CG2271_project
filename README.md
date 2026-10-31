@@ -46,11 +46,13 @@ The merged project's sensor services are now connected to `xInputQueue`:
 - Debounced encoder button -> `EV_PRESS`.
 - LDR -> `EV_BEAM_BROKEN` after filtering, when armed and calibrated/enabled.
 
-Edit **source/vault_sensor_config.h**. `VAULT_ENCODER_STEPS_PER_ROUND=40`
-is a provisional value, not a physical calibration. LDR ADC polling runs,
+Edit **source/vault_sensor_config.h**. `VAULT_ENCODER_STEPS_PER_ROUND=4`
+sets the accepted half-cycle steps per digit change, not a physical revolution. LDR ADC polling runs,
 but `VAULT_LDR_BEAM_DETECTION_ENABLED=0` until its threshold/polarity are
 measured. The existing game task logs incoming events. It remains IDLE until
-an ARM command arrives from the ESP32; the actuator task remains a stub.
+an ARM command arrives from the ESP32. The actuator task now drives RGB and
+buzzer feedback; see [the actuator guide](docs/actuators.md) for behaviour,
+configuration, and board checks.
 
 See [the sensor-service guide](source/README_sensors.md) for event semantics,
 round-boundary reversal examples, calibration, task ownership and diagnostics.

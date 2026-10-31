@@ -393,6 +393,11 @@ static ItemResult send_frame(const vp_frame_t &f, const AiTag &tag, uint8_t &ste
         ev["guess"]     = guess;
         ev["attempt"]   = p[3];
         ev["closeness"] = p[4];
+        if (f.len == VP_LEN_ATTEMPT && p[5] <= VP_DIGIT_CORRECT &&
+            p[6] <= VP_DIGIT_CORRECT && p[7] <= VP_DIGIT_CORRECT) {
+            char feedback[4] = {(char)('0' + p[5]), (char)('0' + p[6]), (char)('0' + p[7]), '\0'};
+            ev["feedback"] = feedback;
+        }
         ITEM_STEP(0, write_json("PUT", String("/events/") + tag.eventId, ev, "at"));
         break;
     }

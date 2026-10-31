@@ -88,4 +88,28 @@ static void state_restrictions(void) {
     assert(!strcmp(vault_state_name((VaultState)100),"?"));
     puts("PASS state/event restrictions, alarms, digit wrap and solve-time saturation");
 }
-int main(void) {full_round();knock_boundaries();state_restrictions();}
+static void digit_feedback(void) {
+    static const struct { uint8_t code[3], guess[3], expected[3]; } cases[] = {
+        {{1,2,3},{2,1,5},{1,1,0}},
+        {{1,2,3},{1,2,5},{2,2,0}},
+        {{1,2,3},{1,2,3},{2,2,2}},
+        {{1,2,3},{4,5,6},{0,0,0}},
+        {{1,2,3},{2,2,1},{0,2,1}},
+        {{1,1,2},{2,2,1},{1,0,1}},
+        {{1,1,2},{1,1,1},{2,2,0}},
+        {{0,0,7},{7,0,0},{1,2,1}},
+        {{0,0,0},{0,0,0},{2,2,2}},
+    };
+    for (unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
+        uint8_t feedback[3];
+        vault_digit_feedback(cases[i].code,cases[i].guess,feedback);
+        assert(!memcmp(feedback,cases[i].expected,3));
+        GameState g;vault_init(&g);
+        memcpy(g.code,cases[i].code,3);memcpy(g.guess,cases[i].guess,3);
+        TxMsg packet;vault_make_packet(&g,PKT_ATTEMPT,&packet);
+        assert(packet.len==8 && !memcmp(packet.payload,g.guess,3));
+        assert(!memcmp(packet.payload+5,feedback,3));
+    }
+    puts("PASS per-digit feedback: requested examples, exact-first duplicate accounting, absent digits and leading zeroes");
+}
+int main(void) {full_round();knock_boundaries();state_restrictions();digit_feedback();}

@@ -41,7 +41,7 @@ typedef enum {
     VP_TAMPER  = 0x03, /* magnitude_mg (uint16 LE)                    (2 B) */
 
     /* MCU -> ESP32 */
-    VP_ATTEMPT = 0x10, /* d0 d1 d2 attempt_no closeness               (5 B) */
+    VP_ATTEMPT = 0x10, /* d0 d1 d2 attempt_no closeness feedback[3]   (8 B) */
     VP_SOLVED  = 0x11, /* attempts, seconds (uint16 LE)               (3 B) */
     VP_ALARM   = 0x12, /* cause (vp_alarm_cause_t)                    (1 B) */
     VP_STATUS  = 0x13, /* state + live sensor snapshot, see VP_ST_*  (12 B) */
@@ -55,7 +55,12 @@ typedef enum {
 #define VP_LEN_ARM     4
 #define VP_LEN_DISARM  0
 #define VP_LEN_TAMPER  2
-#define VP_LEN_ATTEMPT 5
+#define VP_LEN_ATTEMPT_LEGACY 5 /* ESP32 accepts old MCU frames without tile feedback. */
+#define VP_LEN_ATTEMPT 8
+#define VP_ATTEMPT_FEEDBACK 5 /* Three positional bytes: absent=0, present=1, correct=2. */
+#define VP_DIGIT_ABSENT  0
+#define VP_DIGIT_PRESENT 1
+#define VP_DIGIT_CORRECT 2
 #define VP_LEN_SOLVED  3
 #define VP_LEN_ALARM   1
 #define VP_LEN_STATUS  12

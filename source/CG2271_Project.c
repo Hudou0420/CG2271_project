@@ -6,7 +6,7 @@
  *   - tInput     : sensor adapter; calibrated encoder rounds, taps, button
  *   - tTripwire  : polled LDR service; threshold gated by configuration
  *   - tComms     : REAL (Person 3). ESP32 UART link, see vault_comms.c
- *   - tActuator  : STUB (Person 2 fills in)
+ *   - tActuator  : RGB feedback and nonblocking buzzer patterns
  *   - tSelfTest  : TEMPORARY. Injects fake events so you can watch the FSM
  *                  run on the board before anyone else's code exists.
  *                  Set VAULT_SELF_TEST to 0 when real inputs are hooked up.
@@ -30,6 +30,8 @@
 #include "vault_fsm.h"
 #include "vault_sensors.h"
 #include "vault_sensor_config.h"
+#include "vault_actuators.h"
+#include "vault_actuator_config.h"
 
 #ifndef VAULT_SELF_TEST
 #define VAULT_SELF_TEST  0     /* 0 = real sensors, 1 = synthetic FSM demo only */
@@ -110,20 +112,24 @@ static void tGame(void *p)
         TxMsg        tx[3];
         int          ntx = 0;
         VaultActions act;
+        GameState before, after;
 
         if (xSemaphoreTake(xStateMutex, portMAX_DELAY) != pdTRUE) {
             continue;
         }
+        before = gGame;
         act = vault_handle_event(&gGame, &ev);
         if (act.send_attempt) vault_make_packet(&gGame, PKT_ATTEMPT, &tx[ntx++]);
         if (act.send_solved)  vault_make_packet(&gGame, PKT_SOLVED,  &tx[ntx++]);
         if (act.send_alarm)   vault_make_packet(&gGame, PKT_ALARM,   &tx[ntx++]);
+        after = gGame;
         xSemaphoreGive(xStateMutex);
 
         /* --- after releasing the mutex --- */
         if (act.start_lockout) {
             alarmDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(LOCKOUT_MS);
         }
+        vault_actuators_publish(&before, &after, &ev, &act);
         for (int i = 0; i < ntx; i++) {
             /* 0 = never block. If tComms is behind, drop rather than stall the game. */
             xQueueSend(xUartTxQueue, &tx[i], 0);
@@ -144,33 +150,6 @@ static void tTripwire(void *p)
 #else
     vault_tripwire_task(p);
 #endif
-}
-
-/* ------------------------------------------------------------------ */
-/* tActuator  (STUB - Person 2)                                        */
-/* Right now it just prints the state whenever it changes.             */
-/* ------------------------------------------------------------------ */
-static void tActuator(void *p)
-{
-    int lastState = -1;
-    while (1) {
-        VaultState s;
-        uint8_t    closeness;
-
-        if (xSemaphoreTake(xStateMutex, portMAX_DELAY) == pdTRUE) {
-            s         = gGame.state;
-            closeness = gGame.closeness;
-            xSemaphoreGive(xStateMutex);
-
-            if ((int)s != lastState) {
-                PRINTF("[tActuator stub] state -> %s (closeness %d)\r\n",
-                       vault_state_name(s), (int)closeness);
-                lastState = (int)s;
-            }
-            /* Person 2: here drive setLED / playTone / setRelay from s and closeness. */
-        }
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -216,7 +195,7 @@ static void tSelfTest(void *p)
     enterDigit(1);
     enterDigit(2);
     enterDigit(2);
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(VAULT_HINT_MS + 500U));
     post(EV_BEAM_BROKEN, 0, 0);
     PRINTF("(alarm lockout is %d s, wait for it to return to LOCKED)\r\n", LOCKOUT_MS / 1000);
 
@@ -261,6 +240,11 @@ int main(void)
         while (1) { }
     }
 
+    if (!vault_actuators_init()) {
+        PRINTF("ERROR: could not create actuator queues (check heap).\r\n");
+        while (1) { }
+    }
+
 #if !VAULT_SELF_TEST
     if (!vault_sensors_init() ||
         xTaskCreate(vault_input_task, "inputs", configMINIMAL_STACK_SIZE + 180,
@@ -276,7 +260,7 @@ int main(void)
     if (xTaskCreate(tTripwire, "tripwire", configMINIMAL_STACK_SIZE + 160, NULL, PRIO_TRIPWIRE, NULL) != pdPASS ||
         xTaskCreate(tGame, "game", configMINIMAL_STACK_SIZE + 150, NULL, PRIO_GAME, NULL) != pdPASS ||
         xTaskCreate(vault_comms_task, "comms", VAULT_COMMS_STACK_WORDS, NULL, PRIO_COMMS, NULL) != pdPASS ||
-        xTaskCreate(tActuator, "actuator", configMINIMAL_STACK_SIZE + 100, NULL, PRIO_ACTUATOR, NULL) != pdPASS) {
+        xTaskCreate(vault_actuators_task, "actuator", configMINIMAL_STACK_SIZE + 100, NULL, PRIO_ACTUATOR, NULL) != pdPASS) {
         PRINTF("ERROR: could not create game tasks (check heap).\r\n");
         while (1) { }
     }

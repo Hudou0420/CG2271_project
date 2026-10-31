@@ -46,6 +46,16 @@ static void commands(void) {
     xInputQueue=NULL;assert(!vault_comms_init());
     puts("PASS MCU command validation, queue pressure, UART ISR errors and initialization failures");
 }
+static void feedback_packet(void) {
+    reset();gGame.state=ST_LOCKED;gGame.attempts=1;gGame.closeness=86;
+    const uint8_t code[]={1,2,3},guess[]={2,1,5};
+    memcpy(gGame.code,code,3);memcpy(gGame.guess,guess,3);
+    TxMsg tx;vault_make_packet(&gGame,PKT_ATTEMPT,&tx);
+    assert(xQueueSend(xUartTxQueue,&tx,0));service_tx();
+    assert(test_uart_out_size==sizeof(golden_attempt));
+    assert(!memcmp(test_uart_out,golden_attempt,sizeof(golden_attempt)));
+    puts("PASS MCU emits golden per-digit feedback without sending the code");
+}
 static void packets_and_status(void) {
     reset();gGame.state=ST_UNLOCKED;gGame.attempts=4;gGame.solve_time_s=0x1234;
     TxMsg tx;vault_make_packet(&gGame,PKT_SOLVED,&tx);assert(xQueueSend(xUartTxQueue,&tx,0));
@@ -88,4 +98,4 @@ static void retries_and_recovery(void) {
     assert(!uxQueueMessagesWaiting(xInputQueue));
     puts("PASS MCU ACK/NAK, exact retry limit, rollover, partial frames and corruption recovery");
 }
-int main(void) {commands();packets_and_status();retries_and_recovery();test_runtime_reset();}
+int main(void) {commands();feedback_packet();packets_and_status();retries_and_recovery();test_runtime_reset();}

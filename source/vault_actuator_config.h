@@ -1,0 +1,36 @@
+#ifndef VAULT_ACTUATOR_CONFIG_H
+#define VAULT_ACTUATOR_CONFIG_H
+
+#ifndef VAULT_LED_ENABLED
+#define VAULT_LED_ENABLED 1
+#endif
+#ifndef VAULT_BUZZER_ENABLED
+#define VAULT_BUZZER_ENABLED 1
+#endif
+#define VAULT_LED_BRIGHTNESS       64U
+#define VAULT_LED_DIAL_BLUE        16U
+#define VAULT_ACTUATOR_PERIOD_MS   20U
+#define VAULT_HINT_MS              5000U
+#define VAULT_ALARM_FLASH_MS       250U
+#define VAULT_ALARM_SOUND_MS       1000U
+#define VAULT_ALARM_SILENT_MS      2000U
+#define VAULT_ALARM_NOTE_MS        125U
+#define VAULT_ALARM_LOW_HZ         880U
+#define VAULT_ALARM_HIGH_HZ        1320U
+#define VAULT_DIAL_TICK_HZ         2000U
+#define VAULT_DIAL_TICK_MS         20U
+#define VAULT_DIAL_TICK_GAP_MS     60U
+#define VAULT_CONFIRM_HZ           1320U
+#define VAULT_CONFIRM_MS           60U
+#define VAULT_KNOCK_ACCEPTED_HZ    1047U
+#define VAULT_KNOCK_ACCEPTED_MS    80U
+#define VAULT_WRONG_HIGH_HZ        880U
+#define VAULT_WRONG_LOW_HZ         440U
+#define VAULT_WRONG_FIRST_MS       80U
+#define VAULT_WRONG_GAP_MS         40U
+#define VAULT_WRONG_LAST_MS        120U
+#define VAULT_VICTORY_NOTE_MS      120U
+#define VAULT_VICTORY_GAP_MS       40U
+#define VAULT_VICTORY_NOTES        {523U, 659U, 784U, 1047U}
+
+#endif

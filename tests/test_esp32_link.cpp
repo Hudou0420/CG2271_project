@@ -22,13 +22,20 @@ static vp_frame_t output() {
 int main() {
     reset();
     for(const auto &bytes:{std::vector<uint8_t>(golden_solved,golden_solved+sizeof(golden_solved)),
-                          std::vector<uint8_t>(golden_tamper_alarm,golden_tamper_alarm+sizeof(golden_tamper_alarm))}) {
+                          std::vector<uint8_t>(golden_tamper_alarm,golden_tamper_alarm+sizeof(golden_tamper_alarm)),
+                          std::vector<uint8_t>(golden_attempt,golden_attempt+sizeof(golden_attempt))}) {
         Serial1.incoming.insert(Serial1.incoming.end(),bytes.begin(),bytes.end());service_rx();
         assert(output().type==VP_ACK);
         if(last.type==VP_SOLVED)assert(last.payload[0]==4 && vp_get_u16(last.payload+1)==0x1234);
+        else if(last.type==VP_ATTEMPT)assert(last.len==8 && last.payload[5]==1 && last.payload[6]==1 && last.payload[7]==0);
         else assert(last.type==VP_ALARM && last.payload[0]==VP_CAUSE_TAMPER);
     }
-    assert(received==2);
+    assert(received==3);
+    uint8_t attempt[]={2,1,5,1,86,1,1,0};
+    incoming(VP_ATTEMPT,attempt,VP_LEN_ATTEMPT_LEGACY);
+    assert(last.len==5 && received==4 && output().type==VP_ACK);
+    incoming(VP_ATTEMPT,attempt,7);assert(received==4 && output().type==VP_NAK);
+    attempt[5]=3;incoming(VP_ATTEMPT,attempt,8);assert(received==4 && output().type==VP_NAK);
     uint8_t arm[]={0,0,7,0};assert(link_send(VP_ARM,arm,4));service_tx();
     assert(output().type==VP_ARM && s_pending.active);
     uint8_t wrong=VP_DISARM;incoming(VP_ACK,&wrong,1);assert(s_pending.active && delivered==0);

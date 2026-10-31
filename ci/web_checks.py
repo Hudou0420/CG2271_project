@@ -21,7 +21,7 @@ empty = configs / 'empty-env'
 empty.mkdir(exist_ok=True)
 q = lambda value: json.dumps(str(value))
 vite = configs / 'vite.config.ts'
-vite.write_text('import base from "../../../vite.config";\nexport default { ...base, root: ' + q(WEB) + ', envDir: ' + q(empty) + ', build: {...base.build, outDir: ' + q(ROOT / 'build-ci/web/dist') + ', emptyOutDir: true }};\n')
+vite.write_text('import base from "../../../vite.config";\nexport default { ...base, root: ' + q(WEB) + ', envDir: ' + q(empty) + ', server: {...base.server, watch: {...base.server?.watch, ignored: ["**/.firebase/**"]}}, build: {...base.build, outDir: ' + q(ROOT / 'build-ci/web/dist') + ', emptyOutDir: true }};\n')
 # Clear any shell-provided production Firebase configuration too.
 env = {key: value for key, value in os.environ.items() if not key.startswith('VITE_')}
 env['CI'] = 'true'

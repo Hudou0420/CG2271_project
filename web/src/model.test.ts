@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   visibleAiMessage,
+  attemptFeedback,
+  guessDigits,
+  combinationTiles,
+  submittedFeedback,
   canControl,
   formatTime,
   rankScores,
@@ -156,5 +160,58 @@ describe("untrusted snapshots and timer boundaries", () => {
     expect(timerValues(events, "ALARM", 32000).lockout).toBe(0);
     expect(formatTime(Number.NaN)).toBe("—:—");
     expect(formatTime(Number.POSITIVE_INFINITY)).toBe("—:—");
+  });
+});
+
+
+describe("digit tiles", () => {
+  it("uses the existing whole-guess closeness boundaries", () => {
+    expect([0, 39, 40, 69, 70, 100].map(score => attemptFeedback(score).band))
+      .toEqual(["cold", "cold", "cool", "cool", "warm", "warm"]);
+    expect(attemptFeedback(-1).score).toBe(0);
+    expect(attemptFeedback(101).score).toBe(100);
+    for (const value of [undefined, null, "70", NaN, Infinity]) {
+      expect(attemptFeedback(value)).toEqual({ score: 0, band: "cold" });
+    }
+  });
+  it("preserves leading zeroes and rejects incomplete or malformed guesses", () => {
+    expect(guessDigits("007")).toEqual(["0", "0", "7"]);
+    for (const value of [undefined, null, 7, "7", "12", "1234", "1x3", "123\n"]) {
+      expect(guessDigits(value)).toBeNull();
+    }
+  });
+  it("shows the active digit while keeping confirmations masked", () => {
+    expect(combinationTiles("DIALING", 1, 0)).toEqual({
+      confirmed: 1,
+      tiles: [{ kind: "filled", text: "•" }, { kind: "current", text: "0" }, { kind: "empty", text: "" }],
+    });
+    expect(combinationTiles("DIALING", 0, 7).tiles[0].text).toBe("7");
+    expect(combinationTiles("DIALING", 2, 9).tiles[2].kind).toBe("current");
+    for (const dial of [undefined, -1, 10, 1.5, "7"]) {
+      expect(combinationTiles("DIALING", 0, dial).tiles[0].text).toBe("—");
+    }
+    expect(combinationTiles("DIALING", 99, 7).confirmed).toBe(3);
+    expect(combinationTiles("DIALING", -1, 7).confirmed).toBe(0);
+    expect(combinationTiles("DIALING", NaN, 7).confirmed).toBe(0);
+  });
+  it("clears live digits outside dialing and reserves solved tiles for unlock", () => {
+    for (const state of ["IDLE", "LOCKED", "ALARM", "UNKNOWN"] as const) {
+      expect(combinationTiles(state, 2, 7).tiles.every(tile => tile.kind === "empty" && tile.text === "")).toBe(true);
+    }
+    expect(combinationTiles("UNLOCKED", 0, 7).tiles.every(tile => tile.kind === "solved")).toBe(true);
+  });
+});
+
+
+describe("submitted per-digit feedback", () => {
+  it("decodes MCU feedback for the requested examples", () => {
+    expect(submittedFeedback("110")).toEqual(["present", "present", "absent"]);
+    expect(submittedFeedback("220")).toEqual(["correct", "correct", "absent"]);
+    expect(submittedFeedback("222")).toEqual(["correct", "correct", "correct"]);
+  });
+  it("keeps old or malformed feedback neutral instead of guessing correctness", () => {
+    for (const value of [undefined, null, 110, "", "12", "123", "0000", [1, 1, 0]]) {
+      expect(submittedFeedback(value)).toBeNull();
+    }
   });
 });

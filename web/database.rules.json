@@ -30,7 +30,10 @@
         ".read": true,
         ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
         "$id": {
-          ".validate": "newData.hasChildren(['type','at']) && newData.child('type').isString() && newData.child('at').isNumber() && !newData.hasChild('code')"
+          ".validate": "newData.hasChildren(['type','at']) && newData.child('type').isString() && newData.child('at').isNumber() && !newData.hasChild('code')",
+          "feedback": {
+            ".validate": "newData.isString() && newData.val().matches(/^[012]{3}$/) && newData.parent().child('type').val() === 'attempt' && newData.parent().child('guess').isString() && newData.parent().child('guess').val().matches(/^[0-9]{3}$/)"
+          }
         },
         ".indexOn": ["at"]
       },

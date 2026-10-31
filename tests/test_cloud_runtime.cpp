@@ -63,5 +63,15 @@ int main() {
     assert(test_http_calls[0].method=="PUT" && test_http_calls[0].url.find("/leaderboard/stable-event.json")!=String::npos);
     assert(test_http_calls[1].url==test_http_calls[2].url && test_http_calls[2].method=="PUT");
     puts("PASS production multi-step retry progress and stable event/leaderboard IDs");
+    reset();vp_frame_t attempt{};attempt.type=VP_ATTEMPT;attempt.len=VP_LEN_ATTEMPT;
+    const uint8_t data[]={2,1,5,1,86,1,1,0};memcpy(attempt.payload,data,sizeof(data));
+    step=0;plan(200);assert(send_frame(attempt,tag,step)==ITEM_DONE);clean();
+    JsonDocument record;assert(!deserializeJson(record,test_http_calls.back().body));
+    assert(record["guess"].as<String>()=="215" && record["feedback"].as<String>()=="110");
+    assert(record["code"].isNull());
+    attempt.len=VP_LEN_ATTEMPT_LEGACY;step=0;plan(200);
+    assert(send_frame(attempt,tag,step)==ITEM_DONE);clean();
+    assert(!deserializeJson(record,test_http_calls.back().body) && record["feedback"].isNull());
+    puts("PASS cloud publishes per-digit feedback, omits legacy feedback, and never publishes code");
     test_runtime_reset();
 }

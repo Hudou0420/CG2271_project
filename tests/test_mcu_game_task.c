@@ -12,6 +12,8 @@
 #include <assert.h>
 #include <setjmp.h>
 static jmp_buf stop;
+extern uint8_t test_rgb_red, test_rgb_green, test_rgb_blue;
+extern uint32_t test_buzzer_hz;
 static unsigned stage;
 static uint32_t base;
 BspStatus bsp_init(const BspOutputConfig *config) {(void)config;return BSP_OK;}
@@ -36,11 +38,14 @@ static int events(QueueHandle_t queue,void *item,TickType_t wait) {
 int main(void) {
     for(unsigned scenario=0;scenario<3;++scenario) {
         test_runtime_reset();stage=0;base=scenario==1?UINT32_MAX-1000:0;
-        vault_init(&gGame);xInputQueue=xQueueCreate(INPUT_Q_LEN,sizeof(VaultEvent));
+        vault_init(&gGame);assert(vault_actuators_init());xInputQueue=xQueueCreate(INPUT_Q_LEN,sizeof(VaultEvent));
         xUartTxQueue=xQueueCreate(TX_Q_LEN,sizeof(TxMsg));xStateMutex=xSemaphoreCreateMutex();
         if(scenario==2) {TxMsg filler={0};while(xQueueSend(xUartTxQueue,&filler,0)){};}
         test_receive_hook=events;
         if(setjmp(stop)==0)tGame(NULL);
+        vault_actuators_step(test_now);
+        assert(test_rgb_red == VAULT_LED_BRIGHTNESS && test_rgb_green == 0 && test_rgb_blue == 0);
+        assert(test_buzzer_hz == 0);
         assert(gGame.state==ST_LOCKED && gGame.alarm_cause==ALARM_NONE && gGame.start_ms==100);
         if(scenario!=2) {
             TxMsg message;assert(xQueueReceive(xUartTxQueue,&message,0));
