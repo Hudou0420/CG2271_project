@@ -9,11 +9,11 @@ to 80 at the user’s request after LED activity caused unstable readings. Sampl
 The existing beam diagnostics flag now indicates this lid detector is enabled.
 
 Opening while LOCKED or DIALING enters ALARM and enables the active-high laser
-signal on PTD4 / J2-6. Closing switches the laser off on the next sensor/actuator
+signal on PTD7 / J2-10. Closing switches the laser off on the next sensor/actuator
 update. The LED blinks red and the buzzer stays silent for lid alarms. Lid alarms have
 no timed lockout: closure immediately returns to LOCKED. Tamper alarms retain
 their 10-second lockout. IDLE and UNLOCKED ignore the lid.
-The temporary always-on laser bench test has been removed. PTD4 is a logic
+The temporary always-on laser bench test has been removed. PTD7 is a logic
 control output, not a laser module power supply.
 
 Rebuild/flash the MCU, arm with the lid closed, then open it. Verify ALARM and

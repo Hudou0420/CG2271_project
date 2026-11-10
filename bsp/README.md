@@ -25,7 +25,7 @@ component end is outside this table.
 | External RGB B | J2-4 / D9 | PTD2 | TPM0_CH2 | ALT4, 1 kHz, initially off |
 | Passive buzzer signal | J1-8 / D3 | PTA12 | TPM1_CH0 | ALT1 low while silent; ALT3 for PWM |
 | Relay control | J2-8 / D11 | PTD6 | GPIO output | ALT1, logically off |
-| Optional laser logic control | J2-6 / D10 | PTD4 | GPIO output when enabled | Default is input, no pull |
+| Optional laser logic control | J2-10 / D12 | PTD7 | GPIO output when enabled | Default is input, no pull |
 | **Reserved: Person 3 ESP32 link TX** | **J2-18** | **PTE0** | **LPUART1_TX ALT3** | **Configured by source/vault_comms.c, not the BSP** |
 | **Reserved: Person 3 ESP32 link RX** | **J2-20** | **PTE1** | **LPUART1_RX ALT3** | **Configured by source/vault_comms.c, not the BSP** |
 
@@ -46,16 +46,16 @@ FRDM-MCXC444                       Module-side signal
   J2-4   PTD2 -------------------- RGB B
   J1-8   PTA12 ------------------- Buzzer control
   J2-8   PTD6 -------------------- Relay control
-  J2-6   PTD4 - - - - - - - - - - Optional laser logic control
+  J2-10  PTD7 - - - - - - - - - - Optional laser logic control
   GND --------------------------- Common signal ground
 
   J2-18  PTE0  ================== Person 3: LPUART1 TX -> ESP32 GPIO5
   J2-20  PTE1  ================== Person 3: LPUART1 RX <- ESP32 GPIO4
 ```
 
-PTD4 is a logic output only. If the laser is powered/switched solely through
-relay contacts, leave PTD4 unconnected and use bsp_relay_set(). If the module
-has a verified logic-enable input, enable PTD4 in BspOutputConfig. This BSP
+PTD7 is a logic output only. If the laser is powered/switched solely through
+relay contacts, leave PTD7 unconnected and use bsp_relay_set(). If the module
+has a verified logic-enable input, enable PTD7 in BspOutputConfig. This BSP
 does not establish which physical module pin is power or signal.
 
 ## Resource ownership
@@ -179,13 +179,13 @@ Both switches can also be overridden with compiler `-D` definitions.
 | LDR analog output (`S` / AO) | **J4 pin 2 / PTB0 / A0** | ADC0_SE8, 12-bit, ALT0 |
 | LDR VCC | **J3 pin 8 / 3.3 V**, for a compatible module | Keeps its analog output within the board's ADC supply range |
 | LDR ground | **J3 pin 12 or 14 / GND** | Common ground |
-| Laser logic-enable input, if present | **J2 pin 6 / PTD4** | GPIO output, ALT1, initially inactive |
+| Laser logic-enable input, if present | **J2 pin 10 / PTD7** | GPIO output, ALT1, initially inactive |
 | Laser ground | **J3 pin 12 or 14 / GND** | Common signal ground |
 
 The laser GPIO is a **logic control**, not a laser power source. Establish
 the laser module's power/control pin functions separately; if its `S` pin
 is the power input, switch that supply through suitable relay/driver hardware
-instead of powering it from PTD4. The laser's supply voltage must match the
+instead of powering it from PTD7. The laser's supply voltage must match the
 actual module. LDR analog input must remain within VREFL..VREFH, normally
 0..3.3 V; do not feed a 5 V analog output into PTB0.
 
