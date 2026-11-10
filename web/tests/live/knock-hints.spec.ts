@@ -20,6 +20,7 @@ for (const width of [1280, 390, 320]) {
     await page.goto("/");
     const card = page.getByRole("region", { name: "Knock timing feedback" });
     await expect(card).toBeVisible();
+    await expect(card.locator(".knock-diagram > span")).toHaveText(["1", "2", "3"]);
     await expect(card.locator(".knock-pause strong")).toHaveText(["Too short", "Too long"]);
     await expect(card).toContainText("Wait longer.");
     await expect(card).toContainText("Tap sooner.");

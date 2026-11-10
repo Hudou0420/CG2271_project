@@ -5,10 +5,10 @@ export default function KnockFeedback({ hint }: { hint: KnockHint }) {
     <section className="knock-feedback" aria-label="Knock timing feedback" aria-live="polite">
       <div className="knock-feedback-heading">
         <span className="eyebrow">RHYTHM CHECK</span>
-        <div className="knock-diagram" aria-hidden="true">
-          <span /><i className={hint.pauses[0].kind} />
-          <span /><i className={hint.pauses[1].kind} /><span />
-        </div>
+      </div>
+      <div className="knock-diagram" aria-hidden="true">
+        <span>1</span><i className={hint.pauses[0].kind} />
+        <span>2</span><i className={hint.pauses[1].kind} /><span>3</span>
       </div>
       <div className="knock-pause-grid">
         {hint.pauses.map((pause, index) => (
