@@ -5,8 +5,8 @@ duration but waits for the MCU to report that lockout has ended. Disarm and
 additional tamper events cannot shorten or restart the alarm.
 
 Tamper detection still accepts acceleration **or** rotation as evidence. Its
-initial thresholds are **0.45 g** deviation from the calibrated resting magnitude
-and **120 degrees/second**, sustained for **four samples** at 20 Hz. A normal sample,
+initial thresholds are **0.30 g** deviation from the calibrated resting magnitude
+and **80 degrees/second**, sustained for **four samples** at 20 Hz. A normal sample,
 failed read, or disarmed sample breaks the streak. The existing three-second
 packet cooldown remains. These values need a physical check on the assembled box;
 use the ESP32 `imu` console command to inspect readings during normal play and
