@@ -1815,45 +1815,56 @@ footer button:hover {
 .game-master-controls { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line, #ffffff25); }
 .game-master-controls h3 { margin: 0 0 .8rem; }
 
-/* Fixed feedback for the two pauses between three physical knocks. */
+/* Fixed knock feedback shares the game console's olive strip and type scale. */
 .knock-feedback {
-  margin: 0 24px 24px;
-  padding: 20px;
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--orange);
-  background: var(--ink);
+  padding: 12px 26px 14px;
+  background: #20261b;
+  border-bottom: 1px solid #424b35;
 }
-.knock-feedback-heading h3 {
-  margin-top: 6px;
-  font: 700 28px/1.1 var(--display);
+.knock-feedback .eyebrow {
+  font-size: 8px;
+  color: #a6af95;
+  letter-spacing: 1px;
 }
-.knock-diagram {
+.knock-feedback-heading {
   display: flex;
   align-items: center;
-  margin: 20px 0 16px;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
+.knock-feedback-heading > .eyebrow { color: var(--lime); }
+.knock-diagram { display: flex; align-items: center; width: 88px; gap: 4px; }
 .knock-diagram > span {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 6px;
+  height: 6px;
   flex-shrink: 0;
-  border: 1px solid var(--cream);
+  background: #48513a;
+  border: 1px solid #727e58;
   border-radius: 50%;
-  font: 700 12px var(--mono);
 }
-.knock-diagram > i { flex: 1; border-top: 2px dashed var(--muted); }
-.knock-diagram > i.good { border-top: 2px solid var(--lime); }
-.knock-diagram > i.short, .knock-diagram > i.long { border-color: var(--orange); }
-.knock-pause-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.knock-pause { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.knock-pause .eyebrow { font-size: 9px; line-height: 1.6; }
-.knock-pause strong { color: var(--orange); font: 700 14px var(--mono); }
+.knock-diagram > i { flex: 1; border-top: 1px dashed #727e58; }
+.knock-diagram > i.good { border-top: 1px solid var(--lime); }
+.knock-diagram > i.missing { opacity: .45; }
+.knock-pause-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.knock-pause { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.knock-pause + .knock-pause { border-left: 1px solid #414a35; padding-left: 20px; }
+.knock-pause-label { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+.knock-pause strong { color: var(--cream); font: 700 11px/1.4 var(--mono); }
 .knock-pause.good strong { color: var(--lime); }
-.knock-pause.missing strong { color: var(--muted); }
-.knock-pause > span:last-child, .knock-feedback > p { font-size: 12px; line-height: 1.5; }
-.knock-feedback > p { color: var(--muted); margin-top: 16px; }
+.knock-pause.missing strong { color: #9aa68a; }
+.knock-pause > span, .knock-feedback > p { color: #9aa68a; font-size: 11px; line-height: 1.5; }
+.knock-feedback > p { margin-top: 10px; }
+@media (max-width: 1100px) {
+  .knock-feedback { padding-inline: 18px; }
+}
+@media (max-width: 800px) {
+  .knock-feedback { padding-inline: 25px; }
+}
 @media (max-width: 480px) {
-  .knock-feedback { margin: 0 12px 16px; padding: 14px; }
+  .knock-feedback { padding-inline: 14px; }
   .knock-pause-grid { gap: 12px; }
+  .knock-pause + .knock-pause { padding-left: 12px; }
+  .knock-pause-label { gap: 3px 6px; }
+  .knock-feedback .eyebrow { font-size: 7px; letter-spacing: .5px; }
 }

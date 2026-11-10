@@ -12,7 +12,7 @@ const status = (extra = {}) => ({ state: "LOCKED", mcuOnline: true,
 const failure = (extra = {}) => ({ type: "knock_failed", at: Date.now(),
   roundId: "rhythm", actionRevision: 3, reason: "pattern", gaps: "13", ...extra });
 
-for (const width of [1280, 390]) {
+for (const width of [1280, 390, 320]) {
   test(`fixed knock feedback works without AI and stays readable at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -36,6 +36,8 @@ for (const width of [1280, 390]) {
     await page.reload();
     await expect(card).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(card.locator("h3")).toHaveCount(0);
+    await expect(card.locator(":scope > p")).toHaveCount(0);
     await card.screenshot({ path: `../test-reports/knock-feedback-${width}.png` });
 
     await write("vault/status", status({ knocks: 1, actionRevision: 4 }));
