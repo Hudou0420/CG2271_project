@@ -20,11 +20,17 @@ containing its chosen clue. It never receives the raw secret code. A confirmed
 round is required for code clues; disarm then arm if diagnostics say code context
 is unavailable.
 
-Every rejected knock rhythm also gets help. A try fails when all taps have been
-captured with incorrect spacing, or an unfinished sequence exceeds the existing
-two-second inactivity timeout. Hints coach the opening or final pause without
-showing exact target timings. Failed rhythms do not count as code attempts or
-leaderboard attempts, and do not create digit rows in Close calls.
+Rejected knock rhythms use fixed feedback in the dashboard’s “Rhythm check” card,
+independent of the Game master toggle. A three-knock diagram labels both pauses:
+“Too short · Wait longer,” “Too long · Tap sooner,” “Timing good,” or “Not captured.”
+No target timings are shown. Incomplete sequences show “Sequence timed out” after
+the existing two-second inactivity timeout, preserving any captured gap result.
+
+Knock failures do not request Gemini or appear as AI speech-bubble reactions.
+They still publish the existing events and round/action tags. The card clears
+when another sequence starts, the state changes, the connection goes offline,
+or its round/action becomes stale. Failed rhythms do not count as code attempts
+or leaderboard attempts, and do not create digit rows in Close calls.
 
 The new MCU-to-ESP32 `KNOCK_RESULT` frame is type **0x14**, length **3**:
 
@@ -46,7 +52,7 @@ reaction text is checked for numeric disclosures and additional clue language.
 Invalid responses leave the local hint active. Alarm/solve reactions use clue ID
 `-1`, without a useful clue.
 
-There is no normal 15-second request spacing. Current failures request Gemini
+There is no normal 15-second request spacing. Wrong code guesses request Gemini
 once event/status/local-hint publication completes and HTTPS is available. Only
 the latest pending job is retained. Network failures, rejected responses, quota
 backoff and low memory can still leave a local hint active. Starting another try,
@@ -54,16 +60,15 @@ changing rounds, disabling AI or losing the MCU connection invalidates old work.
 
 ## Update and verify
 
-1. Close serial monitors and upload the updated ESP32 firmware first. It continues
-   to accept existing MCU messages and adds support for `KNOCK_RESULT`.
-2. Build and flash `CG2271_Project` through MCUXpresso, then resume execution.
-   Use the normal board image, not the supplementary GNU Arm CI artifact.
-3. In `Project/web`, run `npm run build`, then
-   `npx firebase deploy --only hosting,database`.
-4. Arm a fresh round. Submit an incorrect rhythm and check for
-   `[mcu] KNOCK_RESULT reason=... gaps=...` in the ESP32 console. Confirm a local
-   hint, then a Gemini hint when the provider succeeds. Test a partial-sequence
-   timeout too.
+1. Close serial monitors and upload the updated ESP32 firmware. Knock-failure
+   publication remains compatible with the existing MCU firmware; no MCU update
+   is needed for the fixed dashboard hints.
+2. Build and redeploy the website hosting. Firebase rules and schemas are unchanged.
+3. Arm a fresh round. Submit an incorrect rhythm and check for
+   `[mcu] KNOCK_RESULT reason=... gaps=...` in the ESP32 console. Confirm the
+   dashboard shows both pause results, with no Gemini request for that failure.
+4. Turn Game master off and repeat. Check a partial-sequence timeout, reload,
+   and the start of a new sequence. Test both phone and desktop layouts.
 5. Complete a wrong code guess. Verify its coloured tiles and a useful hint.
    Quickly start a new try and confirm the previous hint clears.
 6. Confirm ordinary taps and dial handling avoid tamper alarms, while deliberate

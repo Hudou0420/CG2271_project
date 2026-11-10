@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   visibleAiMessage,
+  visibleKnockHint,
   guessDigits,
   combinationTiles,
   submittedFeedback,
@@ -103,9 +104,9 @@ describe("game master message lifetime", () => {
       visibleAiMessage({ ...message, source: "local" }, status, source)?.source,
     ).toBe("local");
   });
-  it("shows current failed-rhythm hints without counting them as code guesses", () => {
+  it("keeps failed-rhythm feedback out of AI reactions and code guesses", () => {
     const failed: GameEvent[] = [{ ...source[0], type: "knock_failed", reason: "pattern", gaps: "13" }];
-    expect(visibleAiMessage(message, status, failed)).toEqual(message);
+    expect(visibleAiMessage(message, status, failed)).toBeNull();
     expect(visibleAiMessage(message, { ...status, knocks: 1 }, failed)).toBeNull();
     expect(visibleAiMessage(message, { ...status, actionRevision: 4 }, failed)).toBeNull();
     expect(roundContext([{ id: "armed", type: "armed", at: 0 }, ...failed]).attempts).toEqual([]);
@@ -210,5 +211,41 @@ describe("submitted per-digit feedback", () => {
     for (const value of [undefined, null, 110, "", "12", "123", "0000", [1, 1, 0]]) {
       expect(submittedFeedback(value)).toBeNull();
     }
+  });
+});
+
+describe("fixed knock timing feedback", () => {
+  const status = { state: "LOCKED" as const, espOnline: true, mcuOnline: true,
+    roundId: "r", actionRevision: 3, knocks: 0 };
+  const failure: GameEvent = { id: "k", type: "knock_failed", roundId: "r",
+    actionRevision: 3, at: 100, reason: "pattern", gaps: "13" };
+  it("describes both pauses without disclosing the secret timings", () => {
+    const hint = visibleKnockHint(status, [failure])!;
+    expect(hint.title).toBe("Rhythm needs work.");
+    expect(hint.pauses.map(p => p.advice)).toEqual(["Wait longer.", "Tap sooner."]);
+    expect(JSON.stringify(hint)).not.toMatch(/300|900/);
+    expect(visibleKnockHint(status, [{ ...failure, gaps: "22" }])?.pauses.map(p => p.verdict))
+      .toEqual(["Timing good", "Timing good"]);
+  });
+  it("preserves known gaps on timeout and marks uncaptured gaps honestly", () => {
+    const hint = visibleKnockHint(status, [{ ...failure, reason: "timeout", gaps: "20" }])!;
+    expect(hint.title).toBe("Sequence timed out.");
+    expect(hint.pauses.map(p => p.verdict)).toEqual(["Timing good", "Not captured"]);
+    expect(visibleKnockHint(status, [{ ...failure, reason: "timeout", gaps: "00" }])?.pauses.every(p => p.kind === "missing")).toBe(true);
+  });
+  it("hides failures when the player starts again, changes state, loses connection or changes round", () => {
+    for (const change of [{knocks: 1}, {actionRevision: 4}, {roundId: "new"},
+      {espOnline: false}, {mcuOnline: false},
+      ...(["IDLE", "DIALING", "UNLOCKED", "ALARM", "UNKNOWN"] as const).map(state => ({state}))]) {
+      expect(visibleKnockHint({...status, ...change}, [failure])).toBeNull();
+    }
+    expect(visibleKnockHint({...status, roundId: undefined}, [failure])).toBeNull();
+    expect(visibleKnockHint(status, [])).toBeNull();
+  });
+  it("rejects malformed verdicts and reasons", () => {
+    for (const gaps of [undefined, "", "1", "123", "49", "a1", 13 as unknown as string]) {
+      expect(visibleKnockHint(status, [{...failure, gaps}])).toBeNull();
+    }
+    expect(visibleKnockHint(status, [{...failure, reason: undefined}])).toBeNull();
   });
 });

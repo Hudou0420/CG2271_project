@@ -218,9 +218,11 @@ void ai_frame(const vp_frame_t &frame, AiTag &tag) {
         if (!policy.current(view.reaction.tag)) view.reaction = {};
         if (before != policy.tag.actionRevision || hadCode != policy.hasCode) ++view.version;
     } else if (policy.event(frame, job)) {
-        if (view.enabled && settingsLoaded) ai_local(job, view.reaction);
+        // Knock timings are fixed dashboard feedback, independent of Game master.
+        bool generated = frame.type != VP_KNOCK_RESULT;
+        if (generated && view.enabled && settingsLoaded) ai_local(job, view.reaction);
         else view.reaction = {};
-        send = view.enabled && settingsLoaded && jobs;
+        send = generated && view.enabled && settingsLoaded && jobs;
         ++view.version;
     }
     tag = policy.tag;

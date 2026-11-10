@@ -31,10 +31,12 @@ import {
 } from "lucide-react";
 import { connectVault } from "../vault-api.js";
 import Vault from "./components/Vault";
+import KnockFeedback from "./components/KnockFeedback";
 import { LiveDigitTiles, GuessTiles } from "./components/DigitTiles";
 import { CONFIG_KEY, getConfig, parseFirebaseConfig } from "./config";
 import {
   visibleAiMessage,
+  visibleKnockHint,
   type AiMessage,
   type AiHealth,
   canControl,
@@ -300,6 +302,7 @@ export default function App() {
     : "UNKNOWN";
   const copy = COPY[state];
   const reaction = visibleAiMessage(aiMessage, status, events);
+  const knockHint = visibleKnockHint(status, events);
   const round = roundContext(events);
   const timers = timerValues(events, state, now);
   const controls = canControl(status, busy, owner);
@@ -572,6 +575,7 @@ export default function App() {
                 </small>
               </div>
             </div>
+            {knockHint && <KnockFeedback hint={knockHint} />}
             <div className="round-stats">
               <div>
                 <span className="eyebrow">AT THE VAULT</span>

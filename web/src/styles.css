@@ -1814,3 +1814,46 @@ footer button:hover {
 .ai-source { flex-shrink: 0; margin-left: auto; font-size: .62rem; letter-spacing: .04em; opacity: .65; }
 .game-master-controls { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line, #ffffff25); }
 .game-master-controls h3 { margin: 0 0 .8rem; }
+
+/* Fixed feedback for the two pauses between three physical knocks. */
+.knock-feedback {
+  margin: 0 24px 24px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--orange);
+  background: var(--ink);
+}
+.knock-feedback-heading h3 {
+  margin-top: 6px;
+  font: 700 28px/1.1 var(--display);
+}
+.knock-diagram {
+  display: flex;
+  align-items: center;
+  margin: 20px 0 16px;
+}
+.knock-diagram > span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: 1px solid var(--cream);
+  border-radius: 50%;
+  font: 700 12px var(--mono);
+}
+.knock-diagram > i { flex: 1; border-top: 2px dashed var(--muted); }
+.knock-diagram > i.good { border-top: 2px solid var(--lime); }
+.knock-diagram > i.short, .knock-diagram > i.long { border-color: var(--orange); }
+.knock-pause-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.knock-pause { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.knock-pause .eyebrow { font-size: 9px; line-height: 1.6; }
+.knock-pause strong { color: var(--orange); font: 700 14px var(--mono); }
+.knock-pause.good strong { color: var(--lime); }
+.knock-pause.missing strong { color: var(--muted); }
+.knock-pause > span:last-child, .knock-feedback > p { font-size: 12px; line-height: 1.5; }
+.knock-feedback > p { color: var(--muted); margin-top: 16px; }
+@media (max-width: 480px) {
+  .knock-feedback { margin: 0 12px 16px; padding: 14px; }
+  .knock-pause-grid { gap: 12px; }
+}

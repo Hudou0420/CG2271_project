@@ -186,6 +186,29 @@ export function randomCode() {
   return String(sample[0] % 1000).padStart(3, "0");
 }
 
+const KNOCK_PAUSES = [
+  { kind: "missing", verdict: "Not captured", advice: "Missing tap." },
+  { kind: "short", verdict: "Too short", advice: "Wait longer." },
+  { kind: "good", verdict: "Timing good", advice: "Keep that pause." },
+  { kind: "long", verdict: "Too long", advice: "Tap sooner." },
+] as const;
+
+export function visibleKnockHint(status: Status, events: GameEvent[]) {
+  if (!status.espOnline || !status.mcuOnline || status.state !== "LOCKED" ||
+      (status.knocks ?? 0) > 0 || !status.roundId ||
+      !Number.isInteger(status.actionRevision)) return null;
+  const event = events.find(e => e.type === "knock_failed" &&
+    e.roundId === status.roundId && e.actionRevision === status.actionRevision);
+  if (!event || typeof event.gaps !== "string" || !/^[0-3]{2}$/.test(event.gaps) ||
+      !["pattern", "timeout"].includes(event.reason ?? "")) return null;
+  return {
+    title: event.reason === "timeout" ? "Sequence timed out." : "Rhythm needs work.",
+    instruction: event.reason === "timeout" ? "Try all three knocks again." : "Adjust the pauses. Try again.",
+    pauses: event.gaps.split("").map(mark => KNOCK_PAUSES[Number(mark)]),
+  };
+}
+export type KnockHint = NonNullable<ReturnType<typeof visibleKnockHint>>;
+
 // Both streams must agree. A refresh must never revive a previous attempt's reply.
 export function visibleAiMessage(
   message: AiMessage | null,
@@ -214,7 +237,7 @@ export function visibleAiMessage(
       e.actionRevision === message.actionRevision,
   );
   const expected =
-    (source?.type === "attempt" || source?.type === "knock_failed")
+    source?.type === "attempt"
       ? "LOCKED"
       : source?.type === "alarm"
         ? "ALARM"

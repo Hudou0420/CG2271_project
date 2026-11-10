@@ -53,5 +53,16 @@ int main() {
     assert(!view.enabled && !view.reaction.gemini);verify_cleanup();
     reset();alarm();test_http_begin_ok=false;ai_poll();assert(!strcmp(view.health,"network-timeout"));verify_cleanup();
     assert(test_max_tls==1);puts("PASS production provider errors, cooldowns, invalid/oversized responses, stale in-flight results and cleanup");
+    // Knock failures still advance event tags, but produce no AI work or bubble.
+    for(bool enabled : {true, false}) {
+        reset();ai_enabled(enabled);alarm();
+        vp_frame_t knock{};knock.type=VP_KNOCK_RESULT;knock.len=VP_LEN_KNOCK_RESULT;
+        knock.payload[0]=VP_KNOCK_PATTERN;knock.payload[1]=VP_GAP_SHORT;knock.payload[2]=VP_GAP_LONG;
+        AiTag previous=ai_snapshot().tag, failed{};ai_frame(knock,failed);ai_published(failed);
+        assert(failed.actionRevision>previous.actionRevision && failed.eventId[0]);
+        assert(!view.reaction.message[0]);ai_poll();
+        assert(test_http_calls.empty());verify_cleanup();
+    }
+    puts("PASS knock feedback remains tagged with AI on/off and never requests Gemini");
     test_runtime_reset();
 }
