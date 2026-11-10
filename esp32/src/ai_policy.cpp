@@ -101,17 +101,12 @@ bool ai_clue(const AiJob &job, unsigned index, char *out, unsigned capacity) {
             }
         }
         for (int i = 0; i < 3; ++i) {
+            if (job.code[i] == job.guess[i]) continue;
             if (index-- == 0) {
                 snprintf(out, capacity, "%s digit is %s.", positions[i],
                          (job.code[i] - '0') % 2 ? "odd" : "even");
                 return true;
             }
-        }
-        if (index == 0) {
-            bool repeated = job.code[0] == job.code[1] || job.code[1] == job.code[2] || job.code[0] == job.code[2];
-            snprintf(out, capacity, "%s", repeated ? "The combination contains a repeated digit." :
-                     "All digits in the combination are different.");
-            return true;
         }
     } else if (job.type == VP_KNOCK_RESULT) {
         for (int i = 0; i < 2; ++i) {

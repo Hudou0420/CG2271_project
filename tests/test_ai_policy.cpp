@@ -35,7 +35,7 @@ static void hint_checks() {
     AiPolicy policy;policy.init(7);arm(policy);
     AiJob job{};AiMessage message{};
     assert(policy.event(attempt(1,1,0,9),job));
-    assert(ai_clue_count(job)==7 && job.clue[0]);
+    assert(ai_clue_count(job)==6 && job.clue[0]);
     for (unsigned i=0;i<ai_clue_count(job);++i) {
         char clue[80];assert(ai_clue(job,i,clue,sizeof(clue)));
         std::string text=std::string("Nice try. ")+clue;
@@ -50,12 +50,13 @@ static void hint_checks() {
                      hint_reply(0,"Nice. Still locked. Left digit: go lower."),
                      hint_reply(0,"Left digit: go lower. Left digit: go lower.")})
         assert(!ai_parse_reply(body.c_str(),body.size(),job,message));
-    char property[80];assert(ai_clue(job,6,property,sizeof(property)));
-    assert(!strcmp(property,"All digits in the combination are different."));
+    char property[80];assert(!ai_clue(job,6,property,sizeof(property)));
     memcpy(job.code,"112",4);memcpy(job.guess,"221",4);
     assert(ai_clue(job,3,property,sizeof(property)) && !strcmp(property,"Left digit is odd."));
-    assert(ai_clue(job,6,property,sizeof(property)) && !strcmp(property,"The combination contains a repeated digit."));
-    memcpy(job.guess,"111",4);assert(ai_clue_count(job)==5);
+    assert(!ai_clue(job,6,property,sizeof(property)));
+    memcpy(job.guess,"111",4);assert(ai_clue_count(job)==2);
+    assert(ai_clue(job,0,property,sizeof(property)) && !strcmp(property,"Right digit: go higher."));
+    assert(ai_clue(job,1,property,sizeof(property)) && !strcmp(property,"Right digit is even."));
     vp_frame_t knock{};knock.type=VP_KNOCK_RESULT;knock.len=3;
     knock.payload[1]=VP_GAP_SHORT;knock.payload[2]=VP_GAP_LONG;
     assert(policy.event(knock,job) && ai_clue_count(job)==3);
@@ -72,6 +73,52 @@ static void hint_checks() {
     body=hint_reply(-1," ");assert(!ai_parse_reply(body.c_str(),body.size(),job,message));
     body=hint_reply(0,"Left digit: go lower.");assert(!ai_parse_reply(body.c_str(),body.size(),job,message));
     puts("PASS every-failure clues, Gemini selection, exact wording, secret rejection and rhythm coaching");
+}
+static void latest_guess_checks() {
+    const struct {const char *code;const char *guess;} cases[] = {
+        {"123","423"}, {"123","143"}, {"123","124"}, {"123","443"},
+        {"123","000"}, {"112","111"}, {"112","211"},
+        {"007","107"}, {"007","070"}, {"007","007"}
+    };
+    const char *positions[] = {"Left", "Middle", "Right"};
+    for (auto scenario : cases) {
+        AiPolicy policy;policy.init(10);
+        uint8_t code[3];for(int i=0;i<3;++i)code[i]=scenario.code[i]-'0';
+        policy.prepareArm(code,VP_STATE_IDLE,0);policy.delivery(VP_ARM,true);
+        policy.status(VP_STATE_LOCKED,0,0);assert(policy.hasCode);
+        unsigned wrong=0;for(int i=0;i<3;++i)wrong+=scenario.code[i]!=scenario.guess[i];
+        for(int n=1;n<=12;++n) {
+            AiJob job{};AiMessage message{};
+            assert(policy.event(attempt(n,scenario.guess[0]-'0',scenario.guess[1]-'0',scenario.guess[2]-'0'),job));
+            assert(ai_clue_count(job)==wrong*2);
+            for(unsigned choice=0;choice<ai_clue_count(job);++choice) {
+                char clue[80];assert(ai_clue(job,choice,clue,sizeof(clue)));
+                for(int i=0;i<3;++i)if(scenario.code[i]==scenario.guess[i])assert(!strstr(clue,positions[i]));
+                assert(!strstr(clue,"combination"));
+                auto body=hint_reply(choice,clue);
+                assert(ai_parse_reply(body.c_str(),body.size(),job,message));
+            }
+            ai_local(job,message);
+            for(int i=0;i<3;++i)if(scenario.code[i]==scenario.guess[i])assert(!strstr(message.message,positions[i]));
+            if(!strcmp(scenario.code,"123") && !strcmp(scenario.guess,"423")) {
+                assert(!strcmp(job.clue,"Left digit: go lower.") || !strcmp(job.clue,"Left digit is odd."));
+                for(auto text : {"Right digit is odd.", "Middle digit is even.",
+                     "All digits in the combination are different."}) {
+                    for(int id=0;id<=2;++id) {
+                        auto body=hint_reply(id,text);
+                        assert(!ai_parse_reply(body.c_str(),body.size(),job,message));
+                    }
+                }
+            }
+        }
+        // A new attempt must replace the previous guess when choosing clues.
+        AiJob next{};auto changed=attempt(13,code[0],code[1],(code[2]+1)%10);
+        assert(policy.event(changed,next) && ai_clue_count(next)==2);
+        assert(!strncmp(next.clue,"Right digit",11));
+        policy.invalidate();assert(policy.event(changed,next) && !next.clue[0]);
+        AiMessage fallback{};ai_local(next,fallback);assert(!strcmp(fallback.message,"Still locked."));
+    }
+    puts("PASS hints target only latest incorrect positions, including 123/423, repeated digits and leading zeroes");
 }
 static void cloud_recovery_checks() {
     CloudSchedule schedule;
@@ -96,6 +143,7 @@ static void cloud_recovery_checks() {
 int main() {
     cloud_recovery_checks();
     hint_checks();
+    latest_guess_checks();
     AiPolicy p; p.init(123); arm(p);
     AiJob j{}; AiMessage m{};
     for (int n = 1; n <= 9; ++n) {

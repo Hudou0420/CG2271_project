@@ -15,8 +15,10 @@ intentional disturbance.
 ## Failure hints
 
 Every completed wrong code guess gets a local hint immediately. Gemini chooses
-among valid directional, odd/even, and repetition clues, then writes a message
-containing its chosen clue. It never receives the raw secret code. A confirmed
+among higher/lower and odd/even clues for positions that are incorrect in the
+latest submitted guess, then writes a message containing its chosen clue.
+Correct positions and whole-code repetition clues are excluded. For code `123`
+and guess `423`, only “Left digit: go lower” and “Left digit is odd” are eligible. It never receives the raw secret code. A confirmed
 round is required for code clues; disarm then arm if diagnostics say code context
 is unavailable.
 
