@@ -61,7 +61,7 @@
 #define BSP_RELAY_PIN            6U  /* J2-8 */
 #define BSP_LASER_PORT           PORTD
 #define BSP_LASER_GPIO           GPIOD
-#define BSP_LASER_PIN            7U  /* J2-10, optional logic control only */
+#define BSP_LASER_PIN            4U  /* J2-6 / D10, optional logic control only */
 
 /* Logical CMSIS priority, not a shifted NVIC register value (0..3 here). */
 #ifndef BSP_INPUT_IRQ_PRIORITY

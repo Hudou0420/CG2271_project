@@ -13,7 +13,7 @@ The existing BSP wiring and PWM drivers are used:
 | RGB blue | PTD2 | J2-4 / D9 |
 | Passive buzzer signal | PTA12 | J1-8 / D3 |
 
-The documented RGB LED is common-positive, with active-low PWM. The red and green mapping follows the observed colours recorded in the BSP. Check [the BSP wiring notes](../bsp/README.md) for the existing circuit and module power connections. The laser control signal is active-high on PTD7 / J2-10. It is on only while the lid is detected open during ALARM. Relay operation is unchanged.
+The documented RGB LED is common-positive, with active-low PWM. The red and green mapping follows the observed colours recorded in the BSP. Check [the BSP wiring notes](../bsp/README.md) for the existing circuit and module power connections. The laser control signal is active-high on PTD4 / J2-6. It is on only while the lid is detected open during ALARM. Relay operation is unchanged.
 
 ## What to expect
 
