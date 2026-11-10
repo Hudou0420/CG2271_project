@@ -45,6 +45,7 @@ typedef enum {
     VP_SOLVED  = 0x11, /* attempts, seconds (uint16 LE)               (3 B) */
     VP_ALARM   = 0x12, /* cause (vp_alarm_cause_t)                    (1 B) */
     VP_STATUS  = 0x13, /* state + live sensor snapshot, see VP_ST_*  (12 B) */
+    VP_KNOCK_RESULT = 0x14, /* reason, gap classifications (3 B); no target timings */
 
     /* Both directions */
     VP_ACK     = 0x20, /* echoed TYPE                                 (1 B) */
@@ -63,6 +64,13 @@ typedef enum {
 #define VP_DIGIT_CORRECT 2
 #define VP_LEN_SOLVED  3
 #define VP_LEN_ALARM   1
+#define VP_LEN_KNOCK_RESULT 3
+#define VP_KNOCK_PATTERN 0
+#define VP_KNOCK_TIMEOUT 1
+#define VP_GAP_UNKNOWN 0
+#define VP_GAP_SHORT   1
+#define VP_GAP_OK      2
+#define VP_GAP_LONG    3
 #define VP_LEN_STATUS  12
 #define VP_LEN_ACK     1
 #define VP_LEN_NAK     1

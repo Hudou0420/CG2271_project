@@ -73,5 +73,14 @@ int main() {
     assert(send_frame(attempt,tag,step)==ITEM_DONE);clean();
     assert(!deserializeJson(record,test_http_calls.back().body) && record["feedback"].isNull());
     puts("PASS cloud publishes per-digit feedback, omits legacy feedback, and never publishes code");
+    reset();vp_frame_t knock{};knock.type=VP_KNOCK_RESULT;knock.len=VP_LEN_KNOCK_RESULT;
+    knock.payload[0]=VP_KNOCK_TIMEOUT;knock.payload[1]=VP_GAP_OK;
+    step=0;plan(200);assert(send_frame(knock,tag,step)==ITEM_DONE);clean();
+    assert(!deserializeJson(record,test_http_calls.back().body));
+    assert(record["type"].as<String>()=="knock_failed" && record["reason"].as<String>()=="timeout" && record["gaps"].as<String>()=="20");
+    assert(record["code"].isNull() && record["guess"].isNull() && record["targetTimings"].isNull());
+    assert(!strcmp(s_writtenEvent,tag.eventId));
+    cloud_on_message(knock);assert(uxQueueMessagesWaiting(s_queue)==1);
+    puts("PASS failed knocks publish qualitative feedback and participate in AI publication ordering");
     test_runtime_reset();
 }

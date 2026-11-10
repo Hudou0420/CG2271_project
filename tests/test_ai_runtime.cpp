@@ -3,7 +3,7 @@
 #include <cassert>
 static void reset() {
     https_client().stop();test_runtime_reset();https_guard_init();
-    jobs=nullptr;view={};publishedTag={};cooldownUntil=nextRequest=0;quotaBackoff=60000;settingsLoaded=false;
+    jobs=nullptr;view={};publishedTag={};cooldownUntil=0;quotaBackoff=60000;settingsLoaded=false;
     ESP={};WiFi.connection=WL_CONNECTED;test_http_calls.clear();test_http_plans.clear();test_http_begin_ok=true;
     auto &budget=const_cast<HttpsMemoryBudget &>(https_memory_budget());budget={};budget.observe(100000,50000,true);
     ai_init();ai_enabled(true);test_now=1000;
@@ -13,7 +13,7 @@ static AiTag alarm(bool publish=true) {
     AiTag tag{};ai_frame(f,tag);if(publish)ai_published(tag);return tag;
 }
 static HttpPlan good() {
-    return {200,R"({"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"reaction\":\"Bold choice. Still locked.\"}"}]}}]})",-2,{}};
+    return {200,R"({"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"clueId\":-1,\"message\":\"Bold choice. Still locked.\"}"}]}}]})",-2,{}};
 }
 static void verify_cleanup() {
     assert(test_http_objects==0 && test_live_tls==0 && !test_heap_monitor);
@@ -24,9 +24,17 @@ int main() {
     ai_published(tag);test_http_plans.push_back(good());ai_poll();
     assert(test_http_calls.size()==1 && view.reaction.gemini && !strcmp(view.health,"ready"));
     assert(view.lastSuccessUptimeS==1 && test_http_calls[0].headers.at("x-goog-api-key")=="fixture-gemini-key");verify_cleanup();
+    // Success creates no normal spacing: even an immediate new failure can request Gemini.
+    alarm();test_http_plans.push_back(good());ai_poll();
+    assert(test_http_calls.size()==2 && view.reaction.gemini && ai_snapshot().cooldownSeconds==0);verify_cleanup();
+    // Pending work is bounded to the newest failure.
+    reset();alarm();alarm();AiTag newest=alarm();
+    test_http_plans.push_back(good());ai_poll();
+    assert(test_http_calls.size()==1 && !strcmp(view.reaction.tag.eventId,newest.eventId));verify_cleanup();
+    assert(test_http_calls[0].body.find("secretCode")==String::npos);
     puts("PASS production AI defers without blocking publication, then accepts a verified Gemini response");
     reset();alarm();ESP.free=50000;ai_poll();assert(!strcmp(view.health,"low-memory") && test_http_calls.empty());
-    assert(nextRequest==0 && ai_snapshot().cooldownSeconds==0);verify_cleanup();
+    assert(ai_snapshot().cooldownSeconds==0);verify_cleanup();
     reset();alarm();ESP.largest=18000;ai_poll();assert(!strcmp(view.health,"low-memory") && test_http_calls.empty());verify_cleanup();
     reset();alarm();test_mutex_available=false;ai_poll();assert(!strcmp(view.health,"unavailable") && test_http_calls.empty());test_mutex_available=true;verify_cleanup();
     reset();alarm();WiFi.connection=WL_DISCONNECTED;ai_poll();assert(!strcmp(view.health,"offline") && test_http_calls.empty());verify_cleanup();

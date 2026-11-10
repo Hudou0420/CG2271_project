@@ -82,6 +82,28 @@ void vault_digit_feedback(const uint8_t code[CODE_LEN], const uint8_t guess[CODE
     }
 }
 
+uint32_t vault_knock_wait_ms(const GameState *g, uint32_t now)
+{
+    if (g->state != ST_LOCKED || !g->knock_count) return UINT32_MAX;
+    uint32_t elapsed = now - g->knock_times[g->knock_count - 1];
+    return elapsed > KNOCK_TIMEOUT_MS ? 0 : KNOCK_TIMEOUT_MS - elapsed + 1;
+}
+
+static void knock_failed(GameState *g, uint8_t reason)
+{
+    g->knock_result[0] = reason;
+    for (int i = 0; i < KNOCK_GAPS; ++i) {
+        uint8_t mark = KNOCK_GAP_UNKNOWN;
+        if (g->knock_count > i + 1) {
+            uint32_t gap = g->knock_times[i + 1] - g->knock_times[i];
+            mark = gap_ok(gap, KNOCK_PATTERN_GAPS[i]) ? KNOCK_GAP_OK :
+                gap < KNOCK_PATTERN_GAPS[i] ? KNOCK_GAP_SHORT : KNOCK_GAP_LONG;
+        }
+        g->knock_result[i + 1] = mark;
+    }
+    g->knock_count = 0;
+}
+
 void vault_make_packet(const GameState *g, uint8_t pkt_type, TxMsg *out)
 {
     memset(out, 0, sizeof(*out));
@@ -96,6 +118,11 @@ void vault_make_packet(const GameState *g, uint8_t pkt_type, TxMsg *out)
         out->payload[3] = g->attempts;
         out->payload[4] = g->closeness;
         vault_digit_feedback(g->code, g->guess, &out->payload[5]);
+        break;
+
+    case PKT_KNOCK_RESULT:
+        out->len = 3;
+        memcpy(out->payload, g->knock_result, 3);
         break;
 
     case PKT_SOLVED:
@@ -121,7 +148,7 @@ void vault_make_packet(const GameState *g, uint8_t pkt_type, TxMsg *out)
 /* ------------------------------------------------------------------ */
 VaultActions vault_handle_event(GameState *g, const VaultEvent *e)
 {
-    VaultActions act = { false, false, false, false };
+    VaultActions act = {0};
 
     switch (e->type) {
 
@@ -160,14 +187,19 @@ VaultActions vault_handle_event(GameState *g, const VaultEvent *e)
             if (g->knock_count > 0) {
                 uint32_t last = g->knock_times[g->knock_count - 1];
                 if ((e->tick_ms - last) > KNOCK_TIMEOUT_MS) {
-                    g->knock_count = 0;
+                    knock_failed(g, KNOCK_FAIL_TIMEOUT);
+                    act.send_knock_result = true;
                 }
             }
             g->knock_times[g->knock_count++] = e->tick_ms;
 
             if (g->knock_count == KNOCK_COUNT) {
                 bool ok = vault_knock_matches(g->knock_times);
-                g->knock_count = 0;                   /* always start fresh */
+                if (!ok) {
+                    knock_failed(g, KNOCK_FAIL_PATTERN);
+                    act.send_knock_result = true;
+                }
+                g->knock_count = 0;
                 if (ok) {
                     memset(g->guess, 0, sizeof(g->guess));
                     g->digit_index   = 0;
@@ -175,6 +207,13 @@ VaultActions vault_handle_event(GameState *g, const VaultEvent *e)
                     g->state = ST_DIALING;
                 }
             }
+        }
+        break;
+
+    case EV_KNOCK_TIMEOUT:
+        if (vault_knock_wait_ms(g, e->tick_ms) == 0) {
+            knock_failed(g, KNOCK_FAIL_TIMEOUT);
+            act.send_knock_result = true;
         }
         break;
 

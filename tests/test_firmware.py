@@ -1,9 +1,23 @@
 import os
+import re
+from pathlib import Path
 import unittest
 from native_support import native, json_include, fixture_secrets
 
 
 class FirmwareTests(unittest.TestCase):
+    def test_lockout_duration_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        mcu = re.search(r"#define LOCKOUT_MS\s+(\d+)", (root / "source/vault_types.h").read_text())
+        web = re.search(r"export const LOCKOUT_MS = (\d+)", (root / "web/src/model.ts").read_text())
+        self.assertIsNotNone(mcu)
+        self.assertIsNotNone(web)
+        self.assertEqual(int(mcu[1]), 10000)
+        self.assertEqual(mcu[1], web[1])
+
+    def test_tamper_policy(self):
+        native("tamper", ["tests/test_tamper.cpp"], cxx=True, includes=["esp32/src", "esp32/include"])
+
     def test_mcu_actuator_feedback(self):
         for led, buzzer in ((1, 1), (0, 0), (1, 0), (0, 1)):
             with self.subTest(led=led, buzzer=buzzer):

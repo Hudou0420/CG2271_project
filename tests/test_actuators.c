@@ -61,7 +61,7 @@ static void wrong_hint(uint8_t closeness)
     before.state = ST_DIALING;
     game.state = ST_LOCKED; game.closeness = closeness;
     VaultEvent input = {EV_PRESS, 0, 1};
-    VaultActions actions = {true, false, false, false};
+    VaultActions actions = {.send_attempt = true};
     vault_actuators_publish(&before, &game, &input, &actions);
 }
 static void hints_and_states(void)

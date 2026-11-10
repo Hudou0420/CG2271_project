@@ -51,7 +51,7 @@ void AiPolicy::status(vp_state_t state, uint8_t knocks, uint8_t attempts) {
     lastState_ = state;
 }
 bool AiPolicy::event(const vp_frame_t &f, AiJob &job) {
-    if (f.type != VP_ATTEMPT && f.type != VP_SOLVED && f.type != VP_ALARM) return false;
+    if (f.type != VP_ATTEMPT && f.type != VP_SOLVED && f.type != VP_ALARM && f.type != VP_KNOCK_RESULT) return false;
     job = {};
     ++tag.actionRevision;
     snprintf(tag.eventId, sizeof(tag.eventId), "%08lx-e%lu", (unsigned long)boot_, (unsigned long)++event_);
@@ -65,24 +65,19 @@ bool AiPolicy::event(const vp_frame_t &f, AiJob &job) {
         job.attempt = p[3]; job.closeness = p[4];
         if (count_ == 16) { memmove(history_, history_ + 1, 15 * sizeof(history_[0])); --count_; }
         memcpy(history_[count_++], job.guess, sizeof(job.guess));
-        if (hasCode && job.attempt > 0 && job.attempt % 3 == 0) {
-            const char *positions[] = {"Left", "Middle", "Right"};
-            for (int n = 0; n < 3; ++n) {
-                int i = (hintPosition_ + n) % 3;
-                if (code_[i] == job.guess[i]) continue;
-                snprintf(job.clue, sizeof(job.clue), "%s digit: go %s.", positions[i],
-                         code_[i] > job.guess[i] ? "higher" : "lower");
-                hintPosition_ = (i + 1) % 3;
-                break;
-            }
-        }
     } else if (f.type == VP_SOLVED) {
         job.attempts = p[0]; job.seconds = vp_get_u16(p + 1);
         hasCode = false;
         memset(code_, 0, sizeof(code_));
         memset(pendingCode_, 0, sizeof(pendingCode_));
         pending_ = ack_ = false;
-    } else job.cause = p[0];
+    } else if (f.type == VP_KNOCK_RESULT) memcpy(job.knock, p, 3);
+    else job.cause = p[0];
+    unsigned choices = ai_clue_count(job);
+    if (choices) {
+        ai_clue(job, hintPosition_ % choices, job.clue, sizeof(job.clue));
+        ++hintPosition_;
+    }
     job.historyCount = count_;
     memcpy(job.history, history_, sizeof(history_));
     return true;
@@ -91,16 +86,70 @@ bool AiPolicy::current(const AiTag &other) const {
     return tag.actionRevision == other.actionRevision && !strcmp(tag.roundId, other.roundId) &&
            !strcmp(tag.eventId, other.eventId);
 }
+// Clue IDs are local to this immutable job; the model may select any valid ID.
+bool ai_clue(const AiJob &job, unsigned index, char *out, unsigned capacity) {
+    if (!out || !capacity) return false;
+    out[0] = 0;
+    const char *positions[] = {"Left", "Middle", "Right"};
+    if (job.type == VP_ATTEMPT && job.hasCode) {
+        for (int i = 0; i < 3; ++i) {
+            if (job.code[i] == job.guess[i]) continue;
+            if (index-- == 0) {
+                snprintf(out, capacity, "%s digit: go %s.", positions[i],
+                         job.code[i] > job.guess[i] ? "higher" : "lower");
+                return true;
+            }
+        }
+        for (int i = 0; i < 3; ++i) {
+            if (index-- == 0) {
+                snprintf(out, capacity, "%s digit is %s.", positions[i],
+                         (job.code[i] - '0') % 2 ? "odd" : "even");
+                return true;
+            }
+        }
+        if (index == 0) {
+            bool repeated = job.code[0] == job.code[1] || job.code[1] == job.code[2] || job.code[0] == job.code[2];
+            snprintf(out, capacity, "%s", repeated ? "The combination contains a repeated digit." :
+                     "All digits in the combination are different.");
+            return true;
+        }
+    } else if (job.type == VP_KNOCK_RESULT) {
+        for (int i = 0; i < 2; ++i) {
+            uint8_t gap = job.knock[i + 1];
+            if (gap != VP_GAP_SHORT && gap != VP_GAP_LONG) continue;
+            if (index-- == 0) {
+                snprintf(out, capacity, "%s the pause %s.", gap == VP_GAP_SHORT ? "Lengthen" : "Shorten",
+                         i == 0 ? "after the opening tap" : "before the last tap");
+                return true;
+            }
+        }
+        if (index == 0) {
+            snprintf(out, capacity, "%s", job.knock[0] == VP_KNOCK_TIMEOUT ?
+                     "Finish the rhythm without such a long pause." :
+                     "Keep the opening taps close, then leave a longer pause.");
+            return true;
+        }
+    }
+    return false;
+}
+unsigned ai_clue_count(const AiJob &job) {
+    char text[80];
+    unsigned count = 0;
+    while (ai_clue(job, count, text, sizeof(text))) ++count;
+    return count;
+}
+
 void ai_local(const AiJob &j, AiMessage &out) {
     out = {}; out.tag = j.tag;
     const char *text = j.type == VP_SOLVED ? "Fine. You earned this one." :
-                       j.type == VP_ALARM ? "Subtle. Very subtle." : "Still locked. Your move.";
+                       j.type == VP_ALARM ? "Subtle. Very subtle." :
+                       j.type == VP_KNOCK_RESULT ? "Not quite." : "Still locked.";
     snprintf(out.message, sizeof(out.message), "%s%s%s", text, j.clue[0] ? " " : "", j.clue);
 }
 bool ai_valid_reaction(const char *text) {
     if (!text || !*text || strlen(text) > 120) return false;
     char word[128]{}; unsigned used = 0, words = 0;
-    // Conservative English-only output; directional clues are appended locally.
+    // Validate the reaction after removing the selected, approved clue.
     const char *blocked[] = {"zero","one","two","three","four","five","six","seven","eight","nine",
         "ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen",
         "nineteen","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety",
@@ -111,7 +160,7 @@ bool ai_valid_reaction(const char *text) {
         if (isalpha(*p)) word[used++] = tolower(*p);
         else if (used) {
             word[used] = 0; used = 0;
-            if (++words > 10) return false; // reserve words for the locally appended clue
+            if (++words > 10) return false; // reserve words for the selected clue
             for (const char *bad : blocked) if (!strcmp(word, bad)) return false;
         }
         if (!*p) break;

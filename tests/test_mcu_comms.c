@@ -98,4 +98,11 @@ static void retries_and_recovery(void) {
     assert(!uxQueueMessagesWaiting(xInputQueue));
     puts("PASS MCU ACK/NAK, exact retry limit, rollover, partial frames and corruption recovery");
 }
-int main(void) {commands();feedback_packet();packets_and_status();retries_and_recovery();test_runtime_reset();}
+static void knock_packet(void) {
+    reset();gGame.knock_result[0]=KNOCK_FAIL_PATTERN;
+    gGame.knock_result[1]=KNOCK_GAP_SHORT;gGame.knock_result[2]=KNOCK_GAP_LONG;
+    TxMsg tx;vault_make_packet(&gGame,PKT_KNOCK_RESULT,&tx);
+    assert(xQueueSend(xUartTxQueue,&tx,0));service_tx();
+    assert(test_uart_out_size==sizeof(golden_knock) && !memcmp(test_uart_out,golden_knock,sizeof(golden_knock)));
+}
+int main(void) {commands();knock_packet();feedback_packet();packets_and_status();retries_and_recovery();test_runtime_reset();}

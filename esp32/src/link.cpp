@@ -36,6 +36,7 @@ const char *link_type_name(uint8_t type)
     case VP_ATTEMPT: return "ATTEMPT";
     case VP_SOLVED:  return "SOLVED";
     case VP_ALARM:   return "ALARM";
+    case VP_KNOCK_RESULT: return "KNOCK_RESULT";
     case VP_STATUS:  return "STATUS";
     case VP_ACK:     return "ACK";
     case VP_NAK:     return "NAK";
@@ -53,6 +54,7 @@ static int expected_len(uint8_t type)
     case VP_ATTEMPT: return VP_LEN_ATTEMPT;
     case VP_SOLVED:  return VP_LEN_SOLVED;
     case VP_ALARM:   return VP_LEN_ALARM;
+    case VP_KNOCK_RESULT: return VP_LEN_KNOCK_RESULT;
     case VP_STATUS:  return VP_LEN_STATUS;
     case VP_ACK:     return VP_LEN_ACK;
     case VP_NAK:     return VP_LEN_NAK;
@@ -150,7 +152,9 @@ static void handle_frame(const vp_frame_t &f)
         (f.payload[VP_ATTEMPT_FEEDBACK] > VP_DIGIT_CORRECT ||
          f.payload[VP_ATTEMPT_FEEDBACK + 1] > VP_DIGIT_CORRECT ||
          f.payload[VP_ATTEMPT_FEEDBACK + 2] > VP_DIGIT_CORRECT);
-    if (want < 0 || (f.len != want && !legacyAttempt) || invalidFeedback) {
+    bool invalidKnock = f.type == VP_KNOCK_RESULT && f.len == VP_LEN_KNOCK_RESULT &&
+        (f.payload[0] > VP_KNOCK_TIMEOUT || f.payload[1] > VP_GAP_LONG || f.payload[2] > VP_GAP_LONG);
+    if (want < 0 || (f.len != want && !legacyAttempt) || invalidFeedback || invalidKnock) {
         // Checksum passed but the content doesn't match our protocol
         // (usually the two sides disagree on the spec).
         s_stats.rxBad++;

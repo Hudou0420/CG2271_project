@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <string>
+#include <ArduinoJson.h>
 static vp_frame_t attempt(int n, int a = 0, int b = 0, int c = 0) {
     vp_frame_t f{}; f.type = VP_ATTEMPT;
     f.payload[0] = a; f.payload[1] = b; f.payload[2] = c; f.payload[3] = n; f.payload[4] = 30;
@@ -22,6 +23,55 @@ static void arm(AiPolicy &p) {
 static std::string reply(const char *content, const char *finish = "STOP") {
     return std::string("{\"candidates\":[{\"finishReason\":\"") + finish +
         "\",\"content\":{\"parts\":[{\"text\":\"" + content + "\"}]}}]}";
+}
+static std::string hint_reply(int id, const char *message) {
+    JsonDocument output,provider;output["clueId"]=id;output["message"]=message;
+    std::string text;serializeJson(output,text);
+    provider["candidates"][0]["finishReason"]="STOP";
+    provider["candidates"][0]["content"]["parts"][0]["text"]=text;
+    std::string body;serializeJson(provider,body);return body;
+}
+static void hint_checks() {
+    AiPolicy policy;policy.init(7);arm(policy);
+    AiJob job{};AiMessage message{};
+    assert(policy.event(attempt(1,1,0,9),job));
+    assert(ai_clue_count(job)==7 && job.clue[0]);
+    for (unsigned i=0;i<ai_clue_count(job);++i) {
+        char clue[80];assert(ai_clue(job,i,clue,sizeof(clue)));
+        std::string text=std::string("Nice try. ")+clue;
+        auto body=hint_reply((int)i,text.c_str());
+        assert(ai_parse_reply(body.c_str(),body.size(),job,message) && message.gemini);
+        assert(!strcmp(message.message,text.c_str()));
+    }
+    for (auto body : {hint_reply(99,"Nice try."),hint_reply(-1,"Nice try."),
+                     hint_reply(0,"Nice try."),hint_reply(0,"Left digit: go higher."),
+                     hint_reply(0,"Try zero. Left digit: go lower."),
+                     hint_reply(0,"042. Left digit: go lower."),
+                     hint_reply(0,"Nice. Still locked. Left digit: go lower."),
+                     hint_reply(0,"Left digit: go lower. Left digit: go lower.")})
+        assert(!ai_parse_reply(body.c_str(),body.size(),job,message));
+    char property[80];assert(ai_clue(job,6,property,sizeof(property)));
+    assert(!strcmp(property,"All digits in the combination are different."));
+    memcpy(job.code,"112",4);memcpy(job.guess,"221",4);
+    assert(ai_clue(job,3,property,sizeof(property)) && !strcmp(property,"Left digit is odd."));
+    assert(ai_clue(job,6,property,sizeof(property)) && !strcmp(property,"The combination contains a repeated digit."));
+    memcpy(job.guess,"111",4);assert(ai_clue_count(job)==5);
+    vp_frame_t knock{};knock.type=VP_KNOCK_RESULT;knock.len=3;
+    knock.payload[1]=VP_GAP_SHORT;knock.payload[2]=VP_GAP_LONG;
+    assert(policy.event(knock,job) && ai_clue_count(job)==3);
+    char clue[80];assert(ai_clue(job,0,clue,sizeof(clue)));
+    assert(!strcmp(clue,"Lengthen the pause after the opening tap."));
+    assert(ai_clue(job,1,clue,sizeof(clue)) && !strcmp(clue,"Shorten the pause before the last tap."));
+    ai_local(job,message);assert(message.message[0] && !message.gemini);
+    auto body=hint_reply(1,clue);assert(ai_parse_reply(body.c_str(),body.size(),job,message));
+    AiTag old=job.tag;policy.status(VP_STATE_LOCKED,1,0);assert(!policy.current(old));
+    knock.payload[0]=VP_KNOCK_TIMEOUT;knock.payload[1]=VP_GAP_OK;knock.payload[2]=VP_GAP_UNKNOWN;
+    assert(policy.event(knock,job) && ai_clue_count(job)==1);
+    assert(!strcmp(job.clue,"Finish the rhythm without such a long pause."));
+    policy.invalidate();assert(policy.event(attempt(2),job) && ai_clue_count(job)==0);
+    body=hint_reply(-1," ");assert(!ai_parse_reply(body.c_str(),body.size(),job,message));
+    body=hint_reply(0,"Left digit: go lower.");assert(!ai_parse_reply(body.c_str(),body.size(),job,message));
+    puts("PASS every-failure clues, Gemini selection, exact wording, secret rejection and rhythm coaching");
 }
 static void cloud_recovery_checks() {
     CloudSchedule schedule;
@@ -45,15 +95,14 @@ static void cloud_recovery_checks() {
 }
 int main() {
     cloud_recovery_checks();
+    hint_checks();
     AiPolicy p; p.init(123); arm(p);
     AiJob j{}; AiMessage m{};
     for (int n = 1; n <= 9; ++n) {
         assert(p.event(attempt(n, 1, 0, 9), j));
         assert(!strcmp(j.code, "042"));
-        if (n == 3) assert(!strcmp(j.clue, "Left digit: go lower."));
-        else if (n == 6) assert(!strcmp(j.clue, "Middle digit: go higher."));
-        else if (n == 9) assert(!strcmp(j.clue, "Right digit: go lower."));
-        else assert(!j.clue[0]);
+        assert(j.clue[0] && ai_clue_count(j) >= 4);
+
     }
     ai_local(j, m); assert(!m.gemini); assert(strstr(m.message, j.clue));
     assert(ai_publication_ready(j.tag, j.tag, j.tag, j.tag.eventId));
@@ -91,11 +140,12 @@ int main() {
                            "Knock again.", "Try seventeen.", "THREE.", "<script>", "", "a b c d e f g h i j k"}) assert(!ai_valid_reaction(bad));
     assert(ai_valid_reaction("Bold choice. Still locked."));
     // Mock provider replies exercise actual production parser; no credentials/network.
-    auto good = reply("{\\\"reaction\\\":\\\"Bold choice. Still locked.\\\"}");
+    j = {}; // A reaction-only event has no eligible clue.
+    auto good = reply("{\\\"clueId\\\":-1,\\\"message\\\":\\\"Bold choice. Still locked.\\\"}");
     assert(ai_parse_reply(good.c_str(), good.size(), j, m)); assert(m.gemini);
-    for (auto bad : {std::string("not json"), reply("{\\\"reaction\\\":\\\"Try four.\\\"}"),
-                    reply("{\\\"reaction\\\":\\\"Nice.\\\",\\\"code\\\":\\\"042\\\"}"),
-                    reply("{\\\"reaction\\\":\\\"Nice.\\\"}", "MAX_TOKENS"),
+    for (auto bad : {std::string("not json"), reply("{\\\"clueId\\\":-1,\\\"message\\\":\\\"Try four.\\\"}"),
+                    reply("{\\\"clueId\\\":-1,\\\"message\\\":\\\"Nice.\\\",\\\"code\\\":\\\"042\\\"}"),
+                    reply("{\\\"clueId\\\":-1,\\\"message\\\":\\\"Nice.\\\"}", "MAX_TOKENS"),
                     std::string("{\"candidates\":[]}"), std::string(8193, 'x')})
         assert(!ai_parse_reply(bad.c_str(), bad.size(), j, m));
     uint32_t backoff = 60000;

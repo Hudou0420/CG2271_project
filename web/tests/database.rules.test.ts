@@ -284,3 +284,18 @@ describe("submitted digit feedback", () => {
     }
   });
 });
+
+describe("failed rhythm events", () => {
+  it("publishes only valid qualitative outcomes from the device", async () => {
+    const valid = { type: "knock_failed", reason: "pattern", gaps: "13", at: 1 };
+    const device = db("esp");
+    await assertSucceeds(set(ref(device, "vault/events/knock"), valid));
+    await assertSucceeds(get(ref(db(), "vault/events/knock")));
+    await assertSucceeds(set(ref(device, "vault/events/timeout"), { ...valid, reason: "timeout", gaps: "20" }));
+    await assertFails(set(ref(db("team"), "vault/events/forged"), valid));
+    for (const patch of [{ gaps: "14" }, { gaps: 13 }, { gaps: "1" }, { gaps: null },
+                         { reason: "unknown" }, { reason: null }, { code: "123" }]) {
+      await assertFails(set(ref(device, "vault/events/invalid"), { ...valid, ...patch }));
+    }
+  });
+});

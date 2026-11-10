@@ -28,6 +28,9 @@ void vault_digit_feedback(const uint8_t code[CODE_LEN], const uint8_t guess[CODE
 /* True if the knock timestamps match the secret rhythm (within tolerance). */
 bool vault_knock_matches(const uint32_t times[KNOCK_COUNT]);
 
+/* Milliseconds until an unfinished sequence expires; UINT32_MAX when inactive. */
+uint32_t vault_knock_wait_ms(const GameState *g, uint32_t now);
+
 /* Fill a TxMsg (PKT_ATTEMPT / PKT_SOLVED / PKT_ALARM) from the current state. */
 void vault_make_packet(const GameState *g, uint8_t pkt_type, TxMsg *out);
 

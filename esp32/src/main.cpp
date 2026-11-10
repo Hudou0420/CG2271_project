@@ -91,6 +91,9 @@ static void on_message(const vp_frame_t &f)
     case VP_STATUS:
         on_status(p);
         break;
+    case VP_KNOCK_RESULT:
+        Serial.printf("[mcu] KNOCK_RESULT reason=%u gaps=%u,%u\n", p[0], p[1], p[2]);
+        break;
     case VP_ATTEMPT:
         Serial.printf("[mcu] ATTEMPT #%u: guess %u%u%u, closeness %u\n", p[3],
                       p[0], p[1], p[2], p[4]);

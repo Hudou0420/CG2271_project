@@ -81,6 +81,7 @@ static const char *type_name(uint8_t type)
     case VP_ATTEMPT: return "ATTEMPT";
     case VP_SOLVED:  return "SOLVED";
     case VP_ALARM:   return "ALARM";
+    case VP_KNOCK_RESULT: return "KNOCK_RESULT";
     case VP_STATUS:  return "STATUS";
     case VP_ACK:     return "ACK";
     case VP_NAK:     return "NAK";
@@ -98,6 +99,7 @@ static int expected_len(uint8_t type)
     case VP_ATTEMPT: return VP_LEN_ATTEMPT;
     case VP_SOLVED:  return VP_LEN_SOLVED;
     case VP_ALARM:   return VP_LEN_ALARM;
+    case VP_KNOCK_RESULT: return VP_LEN_KNOCK_RESULT;
     case VP_STATUS:  return VP_LEN_STATUS;
     case VP_ACK:     return VP_LEN_ACK;
     case VP_NAK:     return VP_LEN_NAK;
@@ -105,6 +107,10 @@ static int expected_len(uint8_t type)
     }
 }
 
+_Static_assert(PKT_KNOCK_RESULT == VP_KNOCK_RESULT && KNOCK_FAIL_TIMEOUT == VP_KNOCK_TIMEOUT &&
+               KNOCK_GAP_UNKNOWN == VP_GAP_UNKNOWN && KNOCK_GAP_SHORT == VP_GAP_SHORT &&
+               KNOCK_GAP_OK == VP_GAP_OK && KNOCK_GAP_LONG == VP_GAP_LONG,
+               "Knock result must match shared protocol");
 _Static_assert(DIGIT_ABSENT == VP_DIGIT_ABSENT && DIGIT_PRESENT == VP_DIGIT_PRESENT &&
                DIGIT_CORRECT == VP_DIGIT_CORRECT && TX_MAX_PAYLOAD >= VP_LEN_ATTEMPT,
                "Digit feedback must match the shared UART protocol");

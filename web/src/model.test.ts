@@ -31,7 +31,7 @@ describe("round recovery and public game display", () => {
   it("uses shared event timestamps and never decides lockout completion", () => {
     expect(timerValues(events, "ALARM", 18000)).toEqual({
       elapsed: 13,
-      lockout: 20,
+      lockout: 0,
     });
     expect(timerValues(events, "ALARM", 50000).lockout).toBe(0);
     expect(timerValues([], "ALARM", 50000)).toEqual({
@@ -103,6 +103,13 @@ describe("game master message lifetime", () => {
       visibleAiMessage({ ...message, source: "local" }, status, source)?.source,
     ).toBe("local");
   });
+  it("shows current failed-rhythm hints without counting them as code guesses", () => {
+    const failed: GameEvent[] = [{ ...source[0], type: "knock_failed", reason: "pattern", gaps: "13" }];
+    expect(visibleAiMessage(message, status, failed)).toEqual(message);
+    expect(visibleAiMessage(message, { ...status, knocks: 1 }, failed)).toBeNull();
+    expect(visibleAiMessage(message, { ...status, actionRevision: 4 }, failed)).toBeNull();
+    expect(roundContext([{ id: "armed", type: "armed", at: 0 }, ...failed]).attempts).toEqual([]);
+  });
   it("rejects previous rounds, later actions, missing source events and offline status", () => {
     for (const s of [
       { ...status, roundId: "new" },
@@ -155,8 +162,8 @@ describe("untrusted snapshots and timer boundaries", () => {
   it("clamps future starts and observes the exact lockout deadline", () => {
     const events = [{ id: "a", type: "armed", at: 1000 }, { id: "b", type: "alarm", at: 2000 }];
     expect(timerValues(events, "LOCKED", 999).elapsed).toBe(0);
-    expect(timerValues(events, "ALARM", 31999).lockout).toBe(1);
-    expect(timerValues(events, "ALARM", 32000).lockout).toBe(0);
+    expect(timerValues(events, "ALARM", 11999).lockout).toBe(1);
+    expect(timerValues(events, "ALARM", 12000).lockout).toBe(0);
     expect(formatTime(Number.NaN)).toBe("—:—");
     expect(formatTime(Number.POSITIVE_INFINITY)).toBe("—:—");
   });

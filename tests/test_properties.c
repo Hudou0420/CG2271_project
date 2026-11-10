@@ -34,7 +34,7 @@ int main(int argc,char **argv) {
         GameState g;vault_init(&g);uint32_t clock=random_word();
         for(unsigned j=0;j<64;++j) {
             clock+=random_word()%3000;
-            EventType kind=(EventType)(random_word()%(EV_LOCKOUT_DONE+1));
+            EventType kind=(EventType)(random_word()%(EV_KNOCK_TIMEOUT+1));
             int32_t value=kind==EV_ARM?(int32_t)(random_word()%1000):(int32_t)(random_word()%3)-1;
             VaultEvent e={kind,value,clock};VaultActions a=vault_handle_event(&g,&e);
             assert(g.state>=ST_IDLE && g.state<=ST_ALARM && g.current_digit<10 && g.digit_index<CODE_LEN && g.knock_count<KNOCK_COUNT);

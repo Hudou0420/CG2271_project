@@ -53,6 +53,8 @@ export interface GameEvent {
   seconds?: number;
   attempts?: number;
   cause?: string;
+  reason?: "pattern" | "timeout";
+  gaps?: string;
   roundId?: string;
   actionRevision?: number;
 }
@@ -134,6 +136,8 @@ export function roundContext(events: GameEvent[]) {
     disarmed: current.some((e) => e.type === "disarmed"),
   };
 }
+export const LOCKOUT_MS = 10000;
+
 export function timerValues(events: GameEvent[], state: State, now: number) {
   const r = roundContext(events);
   const running =
@@ -147,7 +151,7 @@ export function timerValues(events: GameEvent[], state: State, now: number) {
           : null,
     lockout:
       state === "ALARM" && r.alarm
-        ? Math.max(0, Math.ceil((r.alarm.at + 30000 - now) / 1000))
+        ? Math.max(0, Math.ceil((r.alarm.at + LOCKOUT_MS - now) / 1000))
         : null,
   };
 }
@@ -210,7 +214,7 @@ export function visibleAiMessage(
       e.actionRevision === message.actionRevision,
   );
   const expected =
-    source?.type === "attempt"
+    (source?.type === "attempt" || source?.type === "knock_failed")
       ? "LOCKED"
       : source?.type === "alarm"
         ? "ALARM"

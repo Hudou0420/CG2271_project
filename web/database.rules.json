@@ -30,9 +30,15 @@
         ".read": true,
         ".write": "auth != null && root.child('access/devices').child(auth.uid).val() === true",
         "$id": {
-          ".validate": "newData.hasChildren(['type','at']) && newData.child('type').isString() && newData.child('at').isNumber() && !newData.hasChild('code')",
+          ".validate": "newData.hasChildren(['type','at']) && newData.child('type').isString() && newData.child('at').isNumber() && !newData.hasChild('code') && (newData.child('type').val() !== 'knock_failed' || newData.hasChildren(['reason','gaps']))",
           "feedback": {
             ".validate": "newData.isString() && newData.val().matches(/^[012]{3}$/) && newData.parent().child('type').val() === 'attempt' && newData.parent().child('guess').isString() && newData.parent().child('guess').val().matches(/^[0-9]{3}$/)"
+          },
+          "reason": {
+            ".validate": "newData.parent().child('type').val() === 'knock_failed' && (newData.val() === 'pattern' || newData.val() === 'timeout')"
+          },
+          "gaps": {
+            ".validate": "newData.parent().child('type').val() === 'knock_failed' && newData.isString() && newData.val().matches(/^[0-3]{2}$/)"
           }
         },
         ".indexOn": ["at"]

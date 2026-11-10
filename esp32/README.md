@@ -4,7 +4,7 @@ Board: **ESP32-S2-DevKitM-1** (built with PlatformIO's `esp32-s2-saola-1` defini
 
 This version implements the UART link to the MCXC444, tamper detection with the MPU-6050,
 and the link to the web dashboard through Firebase Realtime Database (see [web/README.md](../web/README.md)).
-The LLM game master comes later.
+The Gemini game master provides reactions and useful code/rhythm hints.
 
 ## Wiring
 
@@ -74,6 +74,9 @@ two static RX buffers, eight dynamic RX/TX buffers, and frame aggregation off.
 This limits peak throughput to leave more RAM for HTTPS. Keep the
 `--wrap=esp_wifi_init` linker flag; `[wifi] memory profile` confirms it at boot.
 
+See [game master hints and alarm tuning](../docs/game-master-hints.md) for the
+10-second lockout, tamper thresholds, qualitative rhythm feedback, and rollout steps.
+
 ## Testing without the MCU (loopback)
 
 Connect **GPIO4 to GPIO5** with a jumper wire. The ESP32 then receives its own frames:
@@ -103,6 +106,7 @@ The MCXC444 project should compile the same `vault_protocol.c` and `vault_protoc
 | SOLVED | 0x11 | MCU → ESP | attempts, seconds (u16 LE) |
 | ALARM | 0x12 | MCU → ESP | cause (0 = beam, 1 = tamper) |
 | STATUS | 0x13 | MCU → ESP | 12 B: state (0 IDLE, 1 LOCKED, 2 DIALING, 3 UNLOCKED, 4 ALARM), digits entered, dial digit, knocks, attempts, closeness, light (u16 LE), encoder steps (i16 LE), sensor events, flags. See `VP_ST_*` |
+| KNOCK_RESULT | 0x14 | MCU → ESP | reason, opening-gap class, final-gap class (3 B); see the hint guide |
 | ACK | 0x20 | both | echoed TYPE |
 | NAK | 0x21 | both | echoed TYPE |
 

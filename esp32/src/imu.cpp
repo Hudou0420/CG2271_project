@@ -1,3 +1,4 @@
+#include "tamper_policy.h"
 // imu.cpp - reads the MPU-6050 and sends TAMPER to the MCU when the box is
 // shaken or lifted while the vault is armed.
 //
@@ -173,9 +174,7 @@ static void imu_task(void *)
 {
     connect_and_calibrate();
 
-    int        overCount    = 0;
-    float      peakG        = 0;
-    uint32_t   lastTamperMs = 0;
+    TamperPolicy detector;
     TickType_t wake         = xTaskGetTickCount();
 
     for (;;) {
@@ -184,6 +183,7 @@ static void imu_task(void *)
         float accG, gyroDps;
         if (!read_sample(accG, gyroDps)) {
             Serial.println("[imu] read failed");
+            detector.interrupted();
             continue;
         }
         ImuReading r = {accG, fabsf(accG - s_baselineG), gyroDps};
@@ -191,35 +191,14 @@ static void imu_task(void *)
         s_latest = r;
         taskEXIT_CRITICAL(&s_mux);
 
-        bool over = r.devG > TAMPER_ACC_DEV_G || r.gyroDps > TAMPER_GYRO_DPS;
-        if (over) {
-            overCount++;
-            peakG = fmaxf(peakG, accG);
-        } else {
-            overCount = 0;
-            peakG     = 0;
-        }
-
+        bool over = TamperPolicy::over(r.devG, r.gyroDps);
         if (s_stream) {
             Serial.printf("[imu] |a|=%.3f g  dev=%.3f g  gyro=%6.1f dps%s\n",
                           r.accG, r.devG, r.gyroDps, over ? "  OVER" : "");
         }
 
-        if (overCount < TAMPER_SAMPLES) {
-            continue;
-        }
-        overCount = 0;
-
-        if (!state_is_armed()) {
-            if (s_stream) {
-                Serial.println("[imu] tamper detected, but vault not armed");
-            }
-            continue;
-        }
-        if (lastTamperMs != 0 && millis() - lastTamperMs < TAMPER_COOLDOWN_MS) {
-            continue;
-        }
-        lastTamperMs = millis();
+        float peakG;
+        if (!detector.sample(accG, r.devG, r.gyroDps, state_is_armed(), millis(), peakG)) continue;
 
         uint8_t payload[VP_LEN_TAMPER];
         vp_put_u16(payload, (uint16_t)fminf(peakG * 1000.0f, 65535.0f));

@@ -63,6 +63,7 @@ static const char *event_name(EventType type)
     case EV_BEAM_BROKEN: return "EV_BEAM_BROKEN";
     case EV_TAMPER: return "EV_TAMPER";
     case EV_LOCKOUT_DONE: return "EV_LOCKOUT_DONE";
+    case EV_KNOCK_TIMEOUT: return "EV_KNOCK_TIMEOUT";
     default: return "EV_NONE";
     }
 }
@@ -73,27 +74,33 @@ static const char *event_name(EventType type)
 /*                                                                     */
 /* Blocks on xInputQueue. Wakes when an event arrives, runs the FSM,   */
 /* then queues any packets for tComms. During ALARM it waits only for  */
-/* the remaining lockout time, so no software timer is needed.         */
+/* the alarm deadline, so no software timer is needed.         */
 /* ------------------------------------------------------------------ */
 static void tGame(void *p)
 {
     TickType_t alarmDeadline = 0;
 
     while (1) {
-        /* How long may we sleep? Forever, unless an alarm lockout is running. */
+        /* How long may we sleep? Forever, unless alarm or unfinished-knock timing is active. */
         TickType_t wait = portMAX_DELAY;
         if (gGame.state == ST_ALARM) {      /* safe: tGame is the only writer */
             TickType_t nowT = xTaskGetTickCount();
             wait = ((int32_t)(alarmDeadline - nowT) > 0) ? (alarmDeadline - nowT) : 0;
         }
 
+        uint32_t knockWait = vault_knock_wait_ms(&gGame, now_ms());
+        if (knockWait != UINT32_MAX) {
+            TickType_t ticks = pdMS_TO_TICKS(knockWait);
+            if (knockWait && !ticks) ticks = 1;
+            if (ticks < wait) wait = ticks;
+        }
+
         VaultEvent ev;
         if (xQueueReceive(xInputQueue, &ev, wait) != pdTRUE) {
-            /* Timed out: only possible during ALARM -> lockout is over */
-            if (gGame.state != ST_ALARM) {
-                continue;
-            }
-            ev.type    = EV_LOCKOUT_DONE;
+            /* Queue receive drains captured input before a timeout event. */
+            if (gGame.state == ST_ALARM) ev.type = EV_LOCKOUT_DONE;
+            else if (vault_knock_wait_ms(&gGame, now_ms()) == 0) ev.type = EV_KNOCK_TIMEOUT;
+            else continue;
             ev.value   = 0;
             ev.tick_ms = 0;
         }
@@ -109,7 +116,7 @@ static void tGame(void *p)
 #endif
 
         /* --- run the FSM while holding the mutex --- */
-        TxMsg        tx[3];
+        TxMsg        tx[4];
         int          ntx = 0;
         VaultActions act;
         GameState before, after;
@@ -119,6 +126,7 @@ static void tGame(void *p)
         }
         before = gGame;
         act = vault_handle_event(&gGame, &ev);
+        if (act.send_knock_result) vault_make_packet(&gGame, PKT_KNOCK_RESULT, &tx[ntx++]);
         if (act.send_attempt) vault_make_packet(&gGame, PKT_ATTEMPT, &tx[ntx++]);
         if (act.send_solved)  vault_make_packet(&gGame, PKT_SOLVED,  &tx[ntx++]);
         if (act.send_alarm)   vault_make_packet(&gGame, PKT_ALARM,   &tx[ntx++]);

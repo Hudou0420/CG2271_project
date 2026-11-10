@@ -803,7 +803,7 @@ export default function App() {
                 <h3>Keep your hands clean.</h3>
                 <p>
                   A wrong guess sends you back to the knock. Disturb the vault
-                  and you could trigger a 30-second lockout.
+                  and you could trigger a 10-second lockout.
                 </p>
               </div>
             </li>
@@ -1222,7 +1222,7 @@ function GameMasterControls({ api, online }: { api: Api; online: boolean }) {
       </p>
       {settings.enabled && !stale && !health.hasCode && (
         <p className="muted-note">
-          Useful hints need a confirmed round. Disarm, then arm the vault to
+          Code hints need a confirmed round. Disarm, then arm the vault to
           restore them.
         </p>
       )}

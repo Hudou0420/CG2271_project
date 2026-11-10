@@ -36,6 +36,14 @@ int main() {
     assert(last.len==5 && received==4 && output().type==VP_ACK);
     incoming(VP_ATTEMPT,attempt,7);assert(received==4 && output().type==VP_NAK);
     attempt[5]=3;incoming(VP_ATTEMPT,attempt,8);assert(received==4 && output().type==VP_NAK);
+    reset();
+    Serial1.incoming.assign(golden_knock,golden_knock+sizeof(golden_knock));service_rx();
+    assert(received==1 && last.type==VP_KNOCK_RESULT && output().type==VP_ACK);
+    uint8_t knock[]={VP_KNOCK_TIMEOUT,VP_GAP_OK,VP_GAP_UNKNOWN};
+    incoming(VP_KNOCK_RESULT,knock,3);assert(received==2 && output().type==VP_ACK);
+    incoming(VP_KNOCK_RESULT,knock,2);assert(received==2 && output().type==VP_NAK);
+    knock[1]=4;incoming(VP_KNOCK_RESULT,knock,3);assert(received==2 && output().type==VP_NAK);
+    knock[1]=2;knock[0]=2;incoming(VP_KNOCK_RESULT,knock,3);assert(received==2 && output().type==VP_NAK);
     uint8_t arm[]={0,0,7,0};assert(link_send(VP_ARM,arm,4));service_tx();
     assert(output().type==VP_ARM && s_pending.active);
     uint8_t wrong=VP_DISARM;incoming(VP_ACK,&wrong,1);assert(s_pending.active && delivered==0);

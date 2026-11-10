@@ -112,4 +112,33 @@ static void digit_feedback(void) {
     }
     puts("PASS per-digit feedback: requested examples, exact-first duplicate accounting, absent digits and leading zeroes");
 }
-int main(void) {full_round();knock_boundaries();state_restrictions();digit_feedback();}
+static void failed_knocks(void) {
+    GameState g; TxMsg packet;
+    vault_init(&g); event(&g,EV_ARM,123,1);
+    assert(vault_knock_wait_ms(&g,100)==UINT32_MAX);
+    event(&g,EV_KNOCK,0,100);
+    assert(vault_knock_wait_ms(&g,2100)==1);
+    assert(!event(&g,EV_KNOCK_TIMEOUT,0,2100).send_knock_result);
+    assert(event(&g,EV_KNOCK_TIMEOUT,0,2101).send_knock_result);
+    assert(!g.knock_count && !g.attempts && g.state==ST_LOCKED);
+    vault_make_packet(&g,PKT_KNOCK_RESULT,&packet);
+    assert(packet.len==3 && packet.payload[0]==KNOCK_FAIL_TIMEOUT && !packet.payload[1] && !packet.payload[2]);
+    assert(!event(&g,EV_KNOCK_TIMEOUT,0,2200).send_knock_result);
+    event(&g,EV_KNOCK,0,3000);event(&g,EV_KNOCK,0,3100);
+    assert(event(&g,EV_KNOCK,0,4500).send_knock_result);
+    vault_make_packet(&g,PKT_KNOCK_RESULT,&packet);
+    assert(packet.payload[0]==KNOCK_FAIL_PATTERN && packet.payload[1]==KNOCK_GAP_SHORT && packet.payload[2]==KNOCK_GAP_LONG);
+    event(&g,EV_KNOCK,0,5000);event(&g,EV_KNOCK,0,5300);
+    assert(event(&g,EV_KNOCK_TIMEOUT,0,7301).send_knock_result);
+    assert(g.knock_result[1]==KNOCK_GAP_OK && g.knock_result[2]==KNOCK_GAP_UNKNOWN);
+    event(&g,EV_KNOCK,0,8000);assert(event(&g,EV_KNOCK,0,10001).send_knock_result);
+    assert(g.knock_count==1 && g.knock_times[0]==10001);
+    event(&g,EV_KNOCK,0,10301);
+    assert(!event(&g,EV_KNOCK,0,11201).send_knock_result && g.state==ST_DIALING);
+    event(&g,EV_DISARM,0,12000);event(&g,EV_ARM,123,12001);
+    event(&g,EV_KNOCK,0,UINT32_MAX-1000);
+    assert(vault_knock_wait_ms(&g,999)==1);
+    assert(event(&g,EV_KNOCK_TIMEOUT,0,1000).send_knock_result);
+    puts("PASS failed rhythm classification, single timeout event, exact boundaries, new try and rollover");
+}
+int main(void) {failed_knocks();full_round();knock_boundaries();state_restrictions();digit_feedback();}

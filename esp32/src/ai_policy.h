@@ -11,6 +11,7 @@ struct AiJob {
     bool hasCode;
     char code[4], guess[4], history[16][4], clue[64];
     uint8_t historyCount;
+    uint8_t knock[3];
 };
 struct AiMessage { AiTag tag; char message[192]; bool gemini; };
 class AiPolicy {
@@ -33,6 +34,9 @@ private:
 };
 void ai_local(const AiJob &job, AiMessage &out);
 bool ai_valid_reaction(const char *text);
+// Enumerate only truthful clues; no exact secret digits or target timings.
+unsigned ai_clue_count(const AiJob &job);
+bool ai_clue(const AiJob &job, unsigned index, char *out, unsigned capacity);
 
 // The local reaction, its source event and current status must all be public
 // before Gemini can occupy the board's sole TLS budget.

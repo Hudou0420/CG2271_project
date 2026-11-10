@@ -356,7 +356,7 @@ static int write_json(const char *method, const String &path, JsonDocument &doc,
     int code = db_request(method, path, "", body);
     if (code == 200 && path.startsWith("/events/")) {
         const char *type = doc["type"] | "";
-        if (!strcmp(type, "attempt") || !strcmp(type, "alarm") || !strcmp(type, "solved"))
+        if (!strcmp(type, "attempt") || !strcmp(type, "alarm") || !strcmp(type, "solved") || !strcmp(type, "knock_failed"))
             strlcpy(s_writtenEvent, path.c_str() + 8, sizeof(s_writtenEvent));
     }
     if (code == 200 && path == "/aiMessage") {
@@ -398,6 +398,14 @@ static ItemResult send_frame(const vp_frame_t &f, const AiTag &tag, uint8_t &ste
             char feedback[4] = {(char)('0' + p[5]), (char)('0' + p[6]), (char)('0' + p[7]), '\0'};
             ev["feedback"] = feedback;
         }
+        ITEM_STEP(0, write_json("PUT", String("/events/") + tag.eventId, ev, "at"));
+        break;
+    }
+    case VP_KNOCK_RESULT: {
+        ev["type"] = "knock_failed";
+        ev["reason"] = p[0] == VP_KNOCK_TIMEOUT ? "timeout" : "pattern";
+        char gaps[3] = {(char)('0' + p[1]), (char)('0' + p[2]), '\0'};
+        ev["gaps"] = gaps;
         ITEM_STEP(0, write_json("PUT", String("/events/") + tag.eventId, ev, "at"));
         break;
     }
@@ -894,7 +902,7 @@ void cloud_on_message(const vp_frame_t &frame)
 {
     AiTag tag{};
     ai_frame(frame, tag);
-    if (frame.type != VP_ATTEMPT && frame.type != VP_SOLVED && frame.type != VP_ALARM) {
+    if (frame.type != VP_ATTEMPT && frame.type != VP_SOLVED && frame.type != VP_ALARM && frame.type != VP_KNOCK_RESULT) {
         return;
     }
     CloudItem item = {};

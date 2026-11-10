@@ -256,32 +256,37 @@ there is no server or Cloud Function to deploy. The MCU still controls unlocking
 
 Trigger an alarm or complete a wrong guess for the first live check. A **Local**
 reaction appears first; it changes to **Gemini** if an accepted reply arrives
-before the next action. Owner diagnostics explain fallbacks. Space test events
-at least 15 seconds apart. A physical three-wrong-guess test needs working knock
-detection; use the host tests while that hardware issue is pending. Check free
+before the next action. Owner diagnostics explain fallbacks. Every wrong guess and failed rhythm requests a hint; there is no normal
+15-second request spacing. Quota/error backoff and the shared HTTPS memory guard
+still apply. Physical rhythm checks need working knock detection. Check free
 heap in owner AI diagnostics while Firebase and Gemini are both active on the
 board. Static build RAM figures do not measure the peak heap used by a TLS handshake.
 
 ### Behavior and limits
 
-Wrong guesses, alarms and solves trigger short reactions. Every third wrong guess
-gets one locally computed higher/lower clue, rotating among incorrect positions.
-This clue remains available when Gemini fails. Other reactions carry no intentional
-clues. Disabling the game master removes reactions and hints; ordinary dashboard
-guidance remains.
+Every wrong guess and failed or timed-out knock sequence gets an immediate local
+hint. Gemini selects among truthful clue options and writes a response containing
+the selected clue verbatim, with optional understated commentary. Code clues cover
+higher/lower, odd/even and repeated digits; no exact secret digits are revealed.
+Rhythm clues coach the opening or final pause qualitatively, without target timings.
+Alarms and solves still trigger reactions. Disabling the game master removes both
+reactions and hints; ordinary dashboard guidance remains.
 
-Messages clear on the first observed knock, entry into dialing, round changes or
-alarm recovery. Round/event IDs and action revisions prevent late replies and
-page refreshes from reviving old reactions. The bubble labels its current source.
+Messages contain at most 25 words and two short sentences, within the existing
+191-character limit. They clear on the next observed knock, entry into dialing,
+round changes or alarm recovery. Round/event IDs and action revisions prevent
+late replies and refreshes from reviving old hints. Only the newest pending job
+is retained; obsolete jobs are discarded rather than replayed.
 
-Gemini receives the active code, event details, closeness and up to 16 recent
-guesses. It does not receive player names or Wi-Fi/Firebase credentials. Its
-reaction is limited to ten English words and checked for numbers and apparent
-clue language. Firmware appends the permitted directional clue. These checks
-cannot prove that arbitrary generated prose contains no indirect clue. Invalid
-output uses a local reaction.
+Gemini receives approved clue options, event details and up to 16 recent guesses.
+It no longer receives the raw secret code. It does not receive player names or
+Wi-Fi/Firebase credentials. Structured replies must select a valid clue ID and
+include that clue's exact wording once. Remaining reaction text is checked for
+numbers and additional clue language. Invalid replies keep the local hint.
 
-Useful hints need a confirmed dashboard arm. A UART ACK alone does not establish
+
+Code hints need a confirmed dashboard arm. Rhythm hints use MCU-reported outcomes
+and do not need code context. A UART ACK alone does not establish
 acceptance: a fresh post-ACK status must show LOCKED with zero attempts, following
 IDLE/UNLOCKED or an observable attempt-counter reset. Re-arming an untouched LOCKED
 round is ambiguous, so hints stay paused; disarm then arm to restore them. ESP32
