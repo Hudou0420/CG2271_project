@@ -9,9 +9,9 @@ static jmp_buf stop;
 static BspInputLevels levels={true,true,true,true};
 static BspInputCallback callback;
 static BspStatus configuration_status=BSP_OK,adc_status=BSP_OK;
-static uint16_t adc_value=1000;
+static uint16_t adc_value=60;
 static unsigned cycles,stop_after;
-static bool drain_full_queue,disarm_on_read;
+static bool drain_full_queue,disarm_on_read,close_lid;
 static RawInputEvent script[32];
 static size_t script_count,script_next;
 BspStatus bsp_inputs_configure(BspInput input,BspPull pull,BspEdge edge) {(void)input;(void)pull;(void)edge;return configuration_status;}
@@ -26,9 +26,9 @@ BspStatus bsp_light_try_read(uint16_t *out) {
 }
 void bsp_light_cancel(void) {}
 static void reset(void) {
-    test_runtime_reset();raw_queue=NULL;callback=NULL;configuration_status=BSP_OK;adc_status=BSP_OK;
+    test_runtime_reset();raw_queue=NULL;callback=NULL;configuration_status=BSP_OK;adc_status=BSP_OK;adc_value=60;
     raw_drops=0;memset(&stats,0,sizeof(stats));memset(&gGame,0,sizeof(gGame));
-    levels=(BspInputLevels){true,true,true,true};cycles=0;stop_after=4;drain_full_queue=false;disarm_on_read=false;
+    levels=(BspInputLevels){true,true,true,true};cycles=0;stop_after=4;drain_full_queue=false;disarm_on_read=false;close_lid=false;
     script_count=script_next=0;
     xInputQueue=xQueueCreate(INPUT_Q_LEN,sizeof(VaultEvent));xStateMutex=xSemaphoreCreateMutex();
     assert(vault_sensors_init());assert(!vault_sensors_init());
@@ -51,6 +51,7 @@ static void run_input(void) {
 }
 static void delay_period(void) {
     ++cycles;
+    if(close_lid && cycles==3) {adc_value=230;gGame.state=ST_ALARM;}
     if(drain_full_queue && cycles==3) {VaultEvent e;assert(xQueueReceive(xInputQueue,&e,0));}
     if(cycles==stop_after)longjmp(stop,1);
 }
@@ -93,19 +94,26 @@ static void overflow_and_failure(void) {
 }
 static void beam_service(void) {
     reset();gGame.state=ST_LOCKED;gGame.start_ms=1;run_tripwire();
-    assert(stats.ldr_valid && stats.ldr_raw==1000);
+    assert(stats.ldr_valid && stats.ldr_raw==60);
 #if VAULT_LDR_BEAM_DETECTION_ENABLED
-    VaultEvent e;assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_BEAM_BROKEN && e.tick_ms==100);
+    VaultEvent e;assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==100);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     reset();gGame.state=ST_LOCKED;gGame.start_ms=1;drain_full_queue=true;
     VaultEvent filler={EV_NONE,0,0};while(xQueueSend(xInputQueue,&filler,0)){}
     run_tripwire();assert(stats.beam_queue_retries==1);
-    bool found=false;while(xQueueReceive(xInputQueue,&e,0))if(e.type==EV_BEAM_BROKEN){found=true;assert(e.tick_ms==100);}
+    bool found=false;while(xQueueReceive(xInputQueue,&e,0))if(e.type==EV_LID_OPEN){found=true;assert(e.tick_ms==100);}
     assert(found);
     reset();gGame.state=ST_LOCKED;gGame.start_ms=1;disarm_on_read=true;run_tripwire();
     assert(!uxQueueMessagesWaiting(xInputQueue));
 #else
     assert(!uxQueueMessagesWaiting(xInputQueue));
+#endif
+#if VAULT_LDR_BEAM_DETECTION_ENABLED
+    reset();gGame.state=ST_LOCKED;gGame.start_ms=1;close_lid=true;run_tripwire();
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    reset();gGame.state=ST_UNLOCKED;run_tripwire();assert(!uxQueueMessagesWaiting(xInputQueue));
 #endif
     reset();adc_status=BSP_NOT_READY;run_tripwire();assert(!stats.ldr_valid && stats.adc_errors==4);
     puts("PASS production ADC failures, beam enable gate, one-shot event, retry and disarm cancellation");

@@ -7,6 +7,8 @@
 
 static uint8_t output_red, output_green, output_blue;
 static uint32_t output_hz;
+static bool output_laser;
+BspStatus bsp_laser_set(bool on) {output_laser=on;return BSP_OK;}
 static unsigned rgb_calls, buzzer_calls, rgb_failures, buzzer_failures;
 static GameState game;
 BspStatus bsp_rgb_set(uint8_t red, uint8_t green, uint8_t blue)
@@ -210,9 +212,28 @@ static void actual_task(void)
     test_delay_hook = NULL;
     assert(task_cycles == 3);
 }
+static void lid_laser(void)
+{
+    reset();event(EV_ARM,123,1);event(EV_LID_OPEN,0,100);
+    const unsigned times[] = {100, 350, 600, 1100, 2100, 3100, 20100};
+    for(unsigned i=0;i<sizeof(times)/sizeof(times[0]);++i) {
+        vault_actuators_step(times[i]);
+        assert(output_laser && game.state==ST_ALARM);
+        assert(output_hz==0U);
+        unsigned expected_red = ((times[i]-times[0])/VAULT_ALARM_FLASH_MS)%2U == 0U ? VAULT_LED_BRIGHTNESS : 0U;
+        expect_output(expected_red, 0, 0, 0);
+    }
+    event(EV_LID_CLOSED,0,20200);vault_actuators_step(20200);
+    assert(!output_laser && game.state==ST_LOCKED && !output_hz);
+    event(EV_LID_OPEN,0,20300);vault_actuators_step(20300);
+    event(EV_LID_CLOSED,0,20400);vault_actuators_step(20400);
+    assert(!output_laser && game.state==ST_LOCKED && !output_hz);
+    event(EV_DISARM,0,21000);event(EV_LID_OPEN,0,21100);vault_actuators_step(21100);
+    assert(!output_laser && game.state==ST_IDLE);
+}
 int main(void)
 {
-    hints_and_states(); inputs_and_win(); alarm_and_rollover(); queues_and_failures(); preemption(); actual_task();
+    lid_laser(); hints_and_states(); inputs_and_win(); alarm_and_rollover(); queues_and_failures(); preemption(); actual_task();
     test_runtime_reset();
     puts("PASS real actuator task runs at 20 ms; enabled/disabled outputs respect configuration");
 }

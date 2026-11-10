@@ -51,6 +51,24 @@ static int knocks(QueueHandle_t queue,void *item,TickType_t wait) {
     }
     memcpy(item,&event,sizeof(event));return pdTRUE;
 }
+static int lid_events(QueueHandle_t queue,void *item,TickType_t wait) {
+    if(queue!=xInputQueue)return -1;
+    VaultEvent e={EV_NONE,0,0};
+    switch(stage++) {
+    case 0:test_now=100;e=(VaultEvent){EV_ARM,123,100};break;
+    case 1:test_now=200;e.type=EV_LID_OPEN;break;
+    case 2:assert(gGame.state==ST_ALARM && wait==portMAX_DELAY);
+        test_now=300;e.type=EV_LID_CLOSED;break;
+    case 3:assert(gGame.state==ST_LOCKED && wait==portMAX_DELAY);
+        test_now=400;e.type=EV_LID_OPEN;break;
+    case 4:assert(gGame.state==ST_ALARM && wait==portMAX_DELAY);
+        test_now=20000;e.type=EV_NONE;break;
+    case 5:assert(gGame.state==ST_ALARM && wait==portMAX_DELAY);
+        test_now=21000;e.type=EV_LID_CLOSED;break;
+    default:assert(gGame.state==ST_LOCKED && wait==portMAX_DELAY);longjmp(stop,1);
+    }
+    memcpy(item,&e,sizeof(e));return pdTRUE;
+}
 int main(void) {
     for(unsigned scenario=0;scenario<3;++scenario) {
         test_runtime_reset();stage=0;base=scenario==1?UINT32_MAX-1000:0;
@@ -69,6 +87,11 @@ int main(void) {
             assert(!uxQueueMessagesWaiting(xUartTxQueue));
         }
     }
+    test_runtime_reset();stage=0;vault_init(&gGame);assert(vault_actuators_init());
+    xInputQueue=xQueueCreate(INPUT_Q_LEN,sizeof(VaultEvent));
+    xUartTxQueue=xQueueCreate(TX_Q_LEN,sizeof(TxMsg));xStateMutex=xSemaphoreCreateMutex();
+    test_receive_hook=lid_events;
+    if(setjmp(stop)==0)tGame(NULL);
     test_runtime_reset();stage=0;vault_init(&gGame);assert(vault_actuators_init());
     xInputQueue=xQueueCreate(INPUT_Q_LEN,sizeof(VaultEvent));
     xUartTxQueue=xQueueCreate(TX_Q_LEN,sizeof(TxMsg));xStateMutex=xSemaphoreCreateMutex();

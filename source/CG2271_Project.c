@@ -60,6 +60,8 @@ static const char *event_name(EventType type)
     case EV_KNOCK: return "EV_KNOCK";
     case EV_DIAL: return "EV_DIAL";
     case EV_PRESS: return "EV_PRESS";
+    case EV_LID_OPEN: return "EV_LID_OPEN";
+    case EV_LID_CLOSED: return "EV_LID_CLOSED";
     case EV_BEAM_BROKEN: return "EV_BEAM_BROKEN";
     case EV_TAMPER: return "EV_TAMPER";
     case EV_LOCKOUT_DONE: return "EV_LOCKOUT_DONE";
@@ -83,7 +85,7 @@ static void tGame(void *p)
     while (1) {
         /* How long may we sleep? Forever, unless alarm or unfinished-knock timing is active. */
         TickType_t wait = portMAX_DELAY;
-        if (gGame.state == ST_ALARM) {      /* safe: tGame is the only writer */
+        if (gGame.state == ST_ALARM && !gGame.lockout_elapsed) { /* safe: tGame is the only writer */
             TickType_t nowT = xTaskGetTickCount();
             wait = ((int32_t)(alarmDeadline - nowT) > 0) ? (alarmDeadline - nowT) : 0;
         }
@@ -230,7 +232,10 @@ int main(void)
      * enables them after the scheduler and queues are ready. An individual
      * device init failure is logged; the sensor services report availability.
      */
-    BspStatus bspStatus = bsp_init(NULL);
+    BspOutputConfig outputConfig;
+    bsp_outputs_default_config(&outputConfig);
+    outputConfig.enable_laser_signal = true;
+    BspStatus bspStatus = bsp_init(&outputConfig);
     if (bspStatus != BSP_OK) {
         PRINTF("BSP initialization reported status %u; inspect sensor diagnostics.\r\n",
                (unsigned int)bspStatus);

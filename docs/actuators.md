@@ -13,7 +13,7 @@ The existing BSP wiring and PWM drivers are used:
 | RGB blue | PTD2 | J2-4 / D9 |
 | Passive buzzer signal | PTA12 | J1-8 / D3 |
 
-The documented RGB LED is common-positive, with active-low PWM. The red and green mapping follows the observed colours recorded in the BSP. Check [the BSP wiring notes](../bsp/README.md) for the existing circuit and module power connections. This change controls RGB and buzzer only; relay and laser operation remains as before.
+The documented RGB LED is common-positive, with active-low PWM. The red and green mapping follows the observed colours recorded in the BSP. Check [the BSP wiring notes](../bsp/README.md) for the existing circuit and module power connections. The laser control signal is active-high on PTD7 / J2-10. It is on only while the lid is detected open during ALARM. Relay operation is unchanged.
 
 ## What to expect
 
@@ -26,7 +26,8 @@ The documented RGB LED is common-positive, with active-low PWM. The red and gree
 | First two digit confirmations | Dim blue | 1320 Hz beep for 60 ms |
 | Wrong complete guess | Hint colour for 5 seconds, then red | 880 Hz for 80 ms, 40 ms silence, then 440 Hz for 120 ms |
 | Correct complete guess | Green | 523, 659, 784, 1047 Hz ascending tune, once |
-| Alarm/lockout | Red flashing every 250 ms | Alternate 880/1320 Hz every 125 ms for 1 second, then 2 seconds silent; repeat until lockout ends |
+| Lid open while locked | Flashing red | Silent; no timed lockout |
+| Tamper/lockout | Red flashing every 250 ms | Alternate 880/1320 Hz every 125 ms for 1 second, then 2 seconds silent; repeat until lockout ends |
 
 The victory tune uses four 120 ms notes separated by 40 ms gaps, lasting 600 ms. The final digit confirmation uses the wrong-guess or victory sound instead of another confirmation beep.
 
@@ -48,7 +49,7 @@ A failed output write logs one diagnostic and attempts to switch that output off
 2. Enter the accepted knock rhythm. Expect dim blue and a short beep. Turn the dial and confirm digits: ticks should track digit changes, and the first two confirmations should have a distinct beep.
 3. Submit a wrong code. Expect the descending cue and a hint colour for 5 seconds, followed by red. Knock again during the hint to verify entering dialing cancels it.
 4. Solve the code. Expect green and the ascending tune once. Additional dial/button input must not replay it. Rearm or disarm during playback to verify cancellation.
-5. Trigger tamper while armed. Expect flashing red and the repeating 1-second-on/2-seconds-off siren throughout the existing 10-second lockout. Additional tamper or disarm commands must not restart the cadence or shorten lockout. At lockout completion, expect locked red and silence.
+5. Trigger tamper while armed. Expect flashing red and the repeating 1-second-on/2-seconds-off siren throughout the existing 10-second lockout. Additional tamper or disarm commands must not restart the cadence or shorten lockout. At lockout completion, expect locked red and silence if the lid is closed; an open lid holds ALARM until closure. A lid-only alarm has no timed lockout and stops on closure.
 
 If the tap sensor is unavailable, use the existing `VAULT_SELF_TEST=1` MCU build option temporarily. It injects the accepted rhythm and digit events, solves one round, then submits a wrong guess in a second round and triggers a beam alarm. The wrong-guess pause now allows the full hint to expire before the alarm. This bypasses sensor operation and is not proof that taps or beam detection work. After the demo the MCU remains locked; restore `VAULT_SELF_TEST=0` and rebuild/flash for normal use.
 

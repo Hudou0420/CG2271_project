@@ -1,5 +1,28 @@
 # Sensor services in the merged project
 
+## Lid detection calibration
+
+The assembled box measured 225–238 with the lid closed and 94–102 open.
+Detection is enabled by default: three consecutive readings <=80 confirm
+opening; a reading >=180 confirms closure. The opening threshold was lowered
+to 80 at the user’s request after LED activity caused unstable readings. Samples arrive every 50 ms.
+The existing beam diagnostics flag now indicates this lid detector is enabled.
+
+Opening while LOCKED or DIALING enters ALARM and enables the active-high laser
+signal on PTD7 / J2-10. Closing switches the laser off on the next sensor/actuator
+update. The LED blinks red and the buzzer stays silent for lid alarms. Lid alarms have
+no timed lockout: closure immediately returns to LOCKED. Tamper alarms retain
+their 10-second lockout. IDLE and UNLOCKED ignore the lid.
+The temporary always-on laser bench test has been removed. PTD7 is a logic
+control output, not a laser module power supply.
+
+Rebuild/flash the MCU, arm with the lid closed, then open it. Verify ALARM and
+laser and blinking red LED with no buzzer; close to check that the laser
+stops and the LED returns to steady locked red immediately.
+Repeat, holding open beyond 10 seconds: ALARM must remain until closure.
+These thresholds are specific to the measured box and lighting; remeasure if
+sensor placement, wiring, or ambient light changes.
+
 These services are implemented in the repository-root **CG2271_Project**.
 The older nested `cg2271_project_mcu/` bench project was moved to external
 local backups, as documented in the repository README. Existing BSP
@@ -11,23 +34,21 @@ introduced by this service.
 Edit `source/vault_sensor_config.h`:
 
 ```c
-#define VAULT_ENCODER_STEPS_PER_ROUND 4
+#define VAULT_ENCODER_STEPS_PER_ROUND 15
 #define VAULT_ENCODER_DIRECTION       1
-#define VAULT_LDR_BEAM_DETECTION_ENABLED 0
+#define VAULT_LDR_BEAM_DETECTION_ENABLED 1
 #define VAULT_LDR_BLOCKED_WHEN_LOW    1
-#define VAULT_LDR_THRESHOLD           2000U
+#define VAULT_LDR_THRESHOLD           80U
 #define VAULT_LDR_HYSTERESIS          100U
 #define VAULT_LDR_BLOCKED_SAMPLES     3U
 ```
 
-The default is 4 accepted half-cycle steps per digit change. This controls
+The default is 15 accepted half-cycle steps per digit change. This controls
 dial sensitivity; it is not a measured count for a physical revolution.
-The ADC threshold, polarity and hysteresis are also provisional. LDR polling
-is active, but beam-break event generation defaults OFF until the threshold
-and light/dark direction are measured. Set BEAM_DETECTION_ENABLED to 1 only
-after choosing those values. This service does not automatically power or
-align the laser. The RGB/buzzer actuator service does not provide beam readiness
-or a laser/relay settling handshake yet.
+The ADC threshold, polarity and hysteresis use the lid measurements above.
+The legacy BEAM_DETECTION_ENABLED name gates lid events; sampling remains
+active even when event generation is disabled. The laser responds to an
+open-lid alarm, rather than illuminating a tripwire continuously.
 
 The tap defaults to a falling active edge with a pull-up and a 40 ms duplicate
 rejection interval. Change `VAULT_TAP_ACTIVE_LOW` if the measured pulse is
@@ -127,7 +148,7 @@ resynchronizes rather than extending a sequence through missing states.
   queue is full, the pending break is retried next period. Disarm/session
   changes discard pending detections; state is rechecked after ADC work.
 - tGame remains the sole owner of FSM transitions. No BSP interface,
-  UART packet interface, GameState field layout or shared queue name changed.
+  UART packet interface or shared queue name changed.
 
 ## Hardware mode versus synthetic self-test
 

@@ -167,6 +167,8 @@ VaultActions vault_handle_event(GameState *g, const VaultEvent *e)
             g->closeness     = 0;
             g->knock_count   = 0;
             g->alarm_cause   = ALARM_NONE;
+            g->lid_open      = false;
+            g->lockout_elapsed = false;
             g->start_ms      = e->tick_ms;
             g->state         = ST_LOCKED;
         }
@@ -177,6 +179,7 @@ VaultActions vault_handle_event(GameState *g, const VaultEvent *e)
         if (g->state != ST_ALARM) {
             g->knock_count = 0;
             g->state = ST_IDLE;
+            g->lid_open = false;
         }
         break;
 
@@ -251,22 +254,45 @@ VaultActions vault_handle_event(GameState *g, const VaultEvent *e)
         break;
 
     /* ---------- BEAM BROKEN / TAMPER: alarm if armed ---------- */
+    case EV_LID_CLOSED:
+        g->lid_open = false;
+        if (g->state == ST_ALARM && g->lockout_elapsed) {
+            g->alarm_cause = ALARM_NONE;
+            g->state = ST_LOCKED;
+        }
+        break;
+
+    case EV_LID_OPEN:
+        if (vault_is_armed(g) || g->state == ST_ALARM) g->lid_open = true;
+        if (vault_is_armed(g)) {
+            g->alarm_cause = ALARM_BEAM;
+            g->knock_count = 0;
+            g->state = ST_ALARM;
+            g->lockout_elapsed = true; /* Lid alarms have no timed lockout. */
+            act.send_alarm = true;
+        }
+        break;
+
     case EV_BEAM_BROKEN:
     case EV_TAMPER:
         if (vault_is_armed(g)) {
-            g->alarm_cause = (e->type == EV_BEAM_BROKEN) ? ALARM_BEAM : ALARM_TAMPER;
+            g->alarm_cause = (e->type != EV_TAMPER) ? ALARM_BEAM : ALARM_TAMPER;
             g->knock_count = 0;
             g->state       = ST_ALARM;
             act.send_alarm    = true;
             act.start_lockout = true;
+            g->lockout_elapsed = false;
         }
         break;
 
     /* ---------- LOCKOUT_DONE: alarm over, back to LOCKED ---------- */
     case EV_LOCKOUT_DONE:
         if (g->state == ST_ALARM) {
-            g->alarm_cause = ALARM_NONE;
-            g->state       = ST_LOCKED;
+            g->lockout_elapsed = true;
+            if (!g->lid_open) {
+                g->alarm_cause = ALARM_NONE;
+                g->state = ST_LOCKED;
+            }
         }
         break;
 

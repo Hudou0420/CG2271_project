@@ -16,7 +16,7 @@ _Static_assert(VAULT_ALARM_FLASH_MS > 0U && VAULT_ALARM_NOTE_MS > 0U &&
                "Pattern periods must be nonzero");
 /* Numeric order is playback priority; alarm is handled directly from state. */
 typedef enum { CUE_NONE, CUE_TICK, CUE_CONFIRM, CUE_KNOCK, CUE_WRONG, CUE_VICTORY } CueKind;
-typedef struct { VaultState state; uint32_t epoch; } OutputState;
+typedef struct { VaultState state; uint32_t epoch; bool laser; bool lid_alarm; } OutputState;
 typedef struct { uint32_t epoch; CueKind kind; uint8_t closeness; } Cue;
 static QueueHandle_t states, cues;
 static OutputState published, current;
@@ -33,7 +33,7 @@ bool vault_actuators_init(void)
     states = xQueueCreate(1U, sizeof(OutputState));
     cues = xQueueCreate(CUE_QUEUE_LENGTH, sizeof(Cue));
     if (!states || !cues) return false;
-    published = (OutputState){ST_IDLE, 0U};
+    published = (OutputState){ST_IDLE, 0U, false, false};
     current = published;
     have_state = hint_active = tick_played = false;
     led_failed = buzzer_failed = led_written = buzzer_written = false;
@@ -51,6 +51,8 @@ void vault_actuators_publish(const GameState *before, const GameState *after,
     bool disarm = event->type == EV_DISARM && before->state != ST_ALARM;
     if (rearm || disarm || before->state != after->state) ++published.epoch;
     published.state = after->state;
+    published.laser = after->state == ST_ALARM && after->lid_open;
+    published.lid_alarm = published.laser && after->alarm_cause == ALARM_BEAM;
     xQueueOverwrite(states, &published);
 
     Cue cue = {published.epoch, CUE_NONE, after->closeness};
@@ -82,6 +84,8 @@ static void synchronize_state(uint32_t now)
                current.state == ST_DIALING ? CUE_KNOCK : CUE_NONE;
         tone_since = now;
     }
+    current.laser = latest.laser;
+    current.lid_alarm = latest.lid_alarm;
 }
 
 static uint32_t frequency(uint32_t now)
@@ -190,10 +194,12 @@ void vault_actuators_step(uint32_t now)
         uint32_t phase = elapsed % (VAULT_ALARM_SOUND_MS + VAULT_ALARM_SILENT_MS);
         hz = phase < VAULT_ALARM_SOUND_MS ?
             ((phase / VAULT_ALARM_NOTE_MS) % 2U == 0U ? VAULT_ALARM_LOW_HZ : VAULT_ALARM_HIGH_HZ) : 0U;
+        if (current.lid_alarm) hz = 0U; /* Lid indication is visual only. */
         break;
     }
     default: hz = 0U; break;
     }
+    (void)bsp_laser_set(current.laser);
     write_outputs(red, green, blue, hz);
 }
 

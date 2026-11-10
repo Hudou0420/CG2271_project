@@ -13,7 +13,7 @@ _Static_assert(VAULT_ENCODER_STEPS_PER_ROUND > 0 &&
                "Encoder steps per round must be a positive signed 32-bit value");
 _Static_assert(VAULT_ENCODER_DIRECTION == 1 || VAULT_ENCODER_DIRECTION == -1,
                "Encoder direction must be +1 or -1");
-_Static_assert(VAULT_LDR_THRESHOLD >= VAULT_LDR_HYSTERESIS &&
+_Static_assert(VAULT_LDR_THRESHOLD <= 4095U &&
                VAULT_LDR_THRESHOLD + VAULT_LDR_HYSTERESIS <= 4095U &&
                VAULT_LDR_BLOCKED_SAMPLES > 0U, "Invalid beam-filter configuration");
 
@@ -183,23 +183,24 @@ void vault_tripwire_task(void *argument)
     (void)argument;
     VaultBeamFilter filter = {VAULT_LDR_THRESHOLD, VAULT_LDR_HYSTERESIS,
         VAULT_LDR_BLOCKED_SAMPLES, 0U, VAULT_LDR_BLOCKED_WHEN_LOW != 0, false};
-    bool pending_break = false;
-    uint32_t pending_ms = 0U;
+    bool reported_open = false;
+    VaultEvent pending = {EV_NONE, 0, 0};
     uint32_t session = 0U;
     TickType_t last_wake = xTaskGetTickCount();
-    PRINTF("Tripwire: ADC polling every %u ms; beam events %s (configure threshold).\r\n",
+    PRINTF("Lid sensor: ADC every %u ms; detection %s (open <=80, closed >=180).\r\n",
            VAULT_LDR_SAMPLE_MS, VAULT_LDR_BEAM_DETECTION_ENABLED ? "ENABLED" : "DISABLED");
     for (;;) {
         bool armed = false;
         uint32_t current_session = 0U;
         if (xSemaphoreTake(xStateMutex, portMAX_DELAY) == pdTRUE) {
-            armed = vault_is_armed(&gGame);
+            armed = vault_is_armed(&gGame) || gGame.state == ST_ALARM;
             current_session = gGame.start_ms;
             xSemaphoreGive(xStateMutex);
         }
         if (!armed || current_session != session) {
             vault_beam_reset(&filter);
-            pending_break = false;
+            reported_open = false;
+            pending.type = EV_NONE;
             session = current_session;
         }
 
@@ -220,9 +221,8 @@ void vault_tripwire_task(void *argument)
         if (status == BSP_OK) {
             stats.ldr_raw = raw;
             stats.ldr_valid = true;
-            if (VAULT_LDR_BEAM_DETECTION_ENABLED && vault_beam_update(&filter, raw, armed)) {
-                pending_break = true;
-                pending_ms = tick_ms(xTaskGetTickCount());
+            if (VAULT_LDR_BEAM_DETECTION_ENABLED) {
+                (void)vault_beam_update(&filter, raw, armed);
             }
         } else {
             bsp_light_cancel();
@@ -230,22 +230,29 @@ void vault_tripwire_task(void *argument)
             ++stats.adc_errors;
             filter.count = 0U; /* Errors are not dark samples or consecutive valid samples. */
         }
-        if (pending_break) {
-            /* State may have changed while the ADC was completing. */
+        if (VAULT_LDR_BEAM_DETECTION_ENABLED && status == BSP_OK &&
+            pending.type == EV_NONE && filter.latched != reported_open) {
+            pending = (VaultEvent){filter.latched ? EV_LID_OPEN : EV_LID_CLOSED,
+                                   0, tick_ms(xTaskGetTickCount())};
+        }
+        if (pending.type != EV_NONE) {
+            /* Recheck after conversion; retry a full queue next period. */
             bool same_session = false;
             if (xSemaphoreTake(xStateMutex, portMAX_DELAY) == pdTRUE) {
-                same_session = vault_is_armed(&gGame) && gGame.start_ms == session;
+                same_session = (vault_is_armed(&gGame) || gGame.state == ST_ALARM) &&
+                               gGame.start_ms == session;
                 xSemaphoreGive(xStateMutex);
             }
-            VaultEvent event = {EV_BEAM_BROKEN, 0, pending_ms};
             if (!same_session) {
-                pending_break = false;
+                reported_open = false;
+                pending.type = EV_NONE;
                 vault_beam_reset(&filter);
-            } else if (xQueueSend(xInputQueue, &event, 0U) == pdPASS) {
-                pending_break = false;
+            } else if (xQueueSend(xInputQueue, &pending, 0U) == pdPASS) {
+                reported_open = pending.type == EV_LID_OPEN;
+                pending.type = EV_NONE;
                 count_sent_event();
             } else {
-                ++stats.beam_queue_retries; /* Retry next period; don't silently lose alarm. */
+                ++stats.beam_queue_retries;
             }
         }
         vTaskDelayUntil(&last_wake, ms_ticks(VAULT_LDR_SAMPLE_MS));
