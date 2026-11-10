@@ -128,9 +128,23 @@ export function roundContext(events: GameEvent[]) {
   const armed = ordered.findLast((e) => e.type === "armed");
   const startIndex = armed ? ordered.findIndex((e) => e.id === armed.id) : -1;
   const current = startIndex < 0 ? [] : ordered.slice(startIndex);
+  const attempts: GameEvent[] = [];
+  for (const event of current.filter(e => e.type === "attempt")) {
+    const previous = attempts.at(-1);
+    const identified = Number.isInteger(event.attempt) && event.attempt! >= 0 &&
+      event.attempt! <= 255 && guessDigits(event.guess) !== null;
+    const duplicate = previous && identified && previous.attempt === event.attempt &&
+      previous.guess === event.guess && previous.roundId === event.roundId;
+    if (duplicate) {
+      // Prefer coloured feedback over legacy copies; otherwise the newest wins.
+      if (submittedFeedback(event.feedback) || !submittedFeedback(previous.feedback)) {
+        attempts[attempts.length - 1] = event;
+      }
+    } else attempts.push(event);
+  }
   return {
     armed,
-    attempts: current.filter((e) => e.type === "attempt"),
+    attempts,
     alarm: current.findLast((e) => e.type === "alarm"),
     solved: current.findLast((e) => e.type === "solved"),
     disarmed: current.some((e) => e.type === "disarmed"),

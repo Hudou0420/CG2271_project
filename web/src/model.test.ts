@@ -249,3 +249,38 @@ describe("fixed knock timing feedback", () => {
     expect(visibleKnockHint(status, [{...failure, reason: undefined}])).toBeNull();
   });
 });
+
+describe("duplicate close-call delivery", () => {
+  const armed: GameEvent = {id: "armed", type: "armed", at: 0, roundId: "r"};
+  const attempt = (id: string, at: number, number: number, guess: string, feedback?: string): GameEvent =>
+    ({id, at, type: "attempt", attempt: number, guess, feedback, roundId: "r"});
+  it("collapses the reported duplicate before counting or selecting rows", () => {
+    const events = [armed, attempt("a",1,1,"123"), attempt("b",2,2,"345"),
+      attempt("retry",3,2,"345"), attempt("c",4,3,"127")];
+    const rows = roundContext(events.reverse()).attempts;
+    expect(rows.map(e => [e.attempt,e.guess])).toEqual([[1,"123"],[2,"345"],[3,"127"]]);
+    expect(rows[1].id).toBe("retry");
+  });
+  it("preserves feedback when a newer duplicate is legacy or malformed", () => {
+    for (const feedback of [undefined, "bad"]) {
+      const rows = roundContext([armed,attempt("colour",1,2,"345","110"),
+        attempt("legacy",2,2,"345",feedback)]).attempts;
+      expect(rows).toHaveLength(1);expect(rows[0].feedback).toBe("110");
+    }
+    const rows = roundContext([armed,attempt("legacy",1,2,"345"),
+      attempt("colour",2,2,"345","110"),attempt("new",3,2,"345","220")]).attempts;
+    expect(rows).toHaveLength(1);expect(rows[0].id).toBe("new");
+  });
+  it("keeps real repeat guesses, counter wrap, different rounds and unidentified records", () => {
+    const rows = roundContext([armed,attempt("a",1,1,"007"),attempt("b",2,2,"007"),
+      attempt("c",3,255,"007"),attempt("d",4,0,"007"),attempt("e",5,1,"007")]).attempts;
+    expect(rows).toHaveLength(5);
+    const a = attempt("a",1,2,"345");
+    for (const change of [{attempt: undefined}, {guess: undefined}, {guess: "bad"},
+      {attempt: -1}, {attempt: 256}, {roundId: "other"}]) {
+      expect(roundContext([armed,a,{...a,id:"b",at:2,...change}]).attempts).toHaveLength(2);
+    }
+    expect(roundContext([armed,a,{...armed,id:"new",at:3,roundId:"new"},
+      {...a,id:"later",at:4,roundId:"new"}]).attempts.map(e=>e.id)).toEqual(["later"]);
+  });
+});

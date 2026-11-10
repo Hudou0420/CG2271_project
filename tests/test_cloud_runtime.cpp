@@ -9,7 +9,7 @@ bool link_send(uint8_t type,const uint8_t *payload,uint8_t len) {
 static void reset() {
     s_tls.stop();test_runtime_reset();https_guard_init();state_init();ai_init();ai_enabled(true);
     test_http_plans.clear();test_http_calls.clear();test_http_begin_ok=true;ESP={};test_now=1000;
-    s_tls.useBuiltinCACertBundle();s_stats={};s_transportFailed=false;
+    s_tls.useBuiltinCACertBundle();s_stats={};s_haveAttempt=false;s_transportFailed=false;
     s_awaitKey[0]="";s_awaitKey[1]="";s_awaitPlayer="";s_lastCommandKey="";
     s_lastCommandAction="";s_lastCommandResult="";s_resultPending=false;
     s_idToken="fixture-token";s_refreshToken="";s_tokenExpiresMs=100000;
@@ -19,7 +19,38 @@ static void reset() {
 }
 static void plan(int code,const char *body="null") {test_http_plans.push_back({code,body,-2,{}});}
 static void clean() {assert(test_live_tls==0 && test_http_objects==0 && test_http_plans.empty());HttpsLease lease(0);assert(lease.acquired());}
+static void attempt_retries() {
+    reset();vp_frame_t frame{};frame.type=VP_ATTEMPT;frame.len=VP_LEN_ATTEMPT;
+    const uint8_t payload[]={3,4,5,2,50,0,0,0};memcpy(frame.payload,payload,sizeof(payload));
+    cloud_on_message(frame);auto first=ai_snapshot();
+    assert(uxQueueMessagesWaiting(s_queue)==1 && first.reaction.message[0]);
+    // Heartbeats and unrelated input between retries do not erase the identity.
+    vp_frame_t status{};status.type=VP_STATUS;status.len=VP_LEN_STATUS;
+    status.payload[VP_ST_STATE]=VP_STATE_LOCKED;cloud_on_message(status);
+    auto before=ai_snapshot();cloud_on_message(frame);auto after=ai_snapshot();
+    assert(uxQueueMessagesWaiting(s_queue)==1 && after.version==before.version);
+    assert(!strcmp(after.tag.eventId,before.tag.eventId));
+    CloudItem item{};assert(xQueueReceive(s_queue,&item,0));
+    uint8_t step=0;plan(200);assert(send_item(item,step)==ITEM_DONE);clean();
+    assert(test_http_calls.size()==1);cloud_on_message(frame);
+    assert(!uxQueueMessagesWaiting(s_queue));
+    // A genuine later attempt may repeat exactly the same guessed digits.
+    ++frame.payload[3];cloud_on_message(frame);assert(uxQueueMessagesWaiting(s_queue)==1);
+    // A fresh round accepts the same packet bytes again.
+    ai_cancel_context();cloud_on_message(frame);assert(uxQueueMessagesWaiting(s_queue)==2);
+    reset();CloudItem filler{};while(xQueueSend(s_queue,&filler,0)){}
+    cloud_on_message(frame);assert(!s_haveAttempt && s_stats.eventsDropped==1);
+    assert(xQueueReceive(s_queue,&item,0));cloud_on_message(frame);
+    assert(s_haveAttempt && uxQueueMessagesWaiting(s_queue)==CLOUD_EVENT_QUEUE_LEN);
+    before=ai_snapshot();cloud_on_message(frame);
+    assert(ai_snapshot().version==before.version && s_stats.eventsDropped==1);
+    // Legacy five-byte attempt packets are also retry-safe.
+    reset();frame.len=VP_LEN_ATTEMPT_LEGACY;cloud_on_message(frame);cloud_on_message(frame);
+    assert(uxQueueMessagesWaiting(s_queue)==1);
+    puts("PASS duplicate UART attempts produce one event/AI action; later attempts, new rounds and queue recovery remain valid");
+}
 int main() {
+    attempt_retries();
     reset();plan(200,R"({"state":"LOCKED"})");String reply;
     assert(db_request("GET","/status","","",&reply)==200 && reply==R"({"state":"LOCKED"})");clean();
     assert(test_http_calls[0].url=="https://vault.invalid/vault/status.json?auth=fixture-token");

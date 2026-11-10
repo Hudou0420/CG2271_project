@@ -61,6 +61,10 @@ enum ItemResult { ITEM_DONE, ITEM_RETRY };
 static QueueHandle_t s_queue;
 static portMUX_TYPE  s_mux = portMUX_INITIALIZER_UNLOCKED;
 static CloudStats    s_stats;
+// Link-task-owned identity: UART retries must not create new events or AI jobs.
+static bool s_haveAttempt;
+static vp_frame_t s_lastAttempt;
+static char s_attemptRound[sizeof(AiTag{}.roundId)];
 
 #if CLOUD_CONFIGURED
 
@@ -866,20 +870,23 @@ static void cloud_task(void *)
 
 // ---- Public API ----------------------------------------------------------------------
 
-static void enqueue(const CloudItem &item)
+static bool enqueue(const CloudItem &item)
 {
     if (s_queue == nullptr) {
-        return; // cloud link off
+        return false; // cloud link off
     }
     if (xQueueSend(s_queue, &item, 0) != pdTRUE) {
         taskENTER_CRITICAL(&s_mux);
         s_stats.eventsDropped++;
         taskEXIT_CRITICAL(&s_mux);
+        return false;
     }
+    return true;
 }
 
 void cloud_init()
 {
+    s_haveAttempt = false;
 #if CLOUD_CONFIGURED
     s_stats.configured = true;
     s_queue            = xQueueCreate(CLOUD_EVENT_QUEUE_LEN, sizeof(CloudItem));
@@ -900,6 +907,12 @@ CloudStats cloud_stats()
 
 void cloud_on_message(const vp_frame_t &frame)
 {
+    if (frame.type == VP_ATTEMPT) {
+        const AiTag current = ai_snapshot().tag;
+        if (s_haveAttempt && !strcmp(current.roundId, s_attemptRound) &&
+            frame.len == s_lastAttempt.len &&
+            !memcmp(frame.payload, s_lastAttempt.payload, frame.len)) return;
+    }
     AiTag tag{};
     ai_frame(frame, tag);
     if (frame.type != VP_ATTEMPT && frame.type != VP_SOLVED && frame.type != VP_ALARM && frame.type != VP_KNOCK_RESULT) {
@@ -909,7 +922,11 @@ void cloud_on_message(const vp_frame_t &frame)
     item.kind      = ITEM_FRAME;
     item.frame     = frame;
     item.ai        = tag;
-    enqueue(item);
+    if (enqueue(item) && frame.type == VP_ATTEMPT) {
+        s_lastAttempt = frame;
+        strlcpy(s_attemptRound, tag.roundId, sizeof(s_attemptRound));
+        s_haveAttempt = true;
+    }
 }
 
 void cloud_on_delivered(uint8_t type, bool ok)

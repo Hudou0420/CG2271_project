@@ -60,6 +60,18 @@ the latest pending job is retained. Network failures, rejected responses, quota
 backoff and low memory can still leave a local hint active. Starting another try,
 changing rounds, disabling AI or losing the MCU connection invalidates old work.
 
+## Attempt retransmissions
+
+The ESP32 acknowledges UART retransmissions normally but suppresses exact copies
+of its last queued attempt within the same round before creating another cloud
+event or AI job. A full queue does not mark an attempt as accepted. A new round
+or a different attempt packet can be accepted again.
+
+The dashboard also collapses consecutive copies of the same identified attempt
+within the current round, including records already stored in Firebase. It keeps
+valid per-digit feedback in preference to a legacy copy. Identical guesses with
+different attempt numbers remain separate; database records are not deleted.
+
 ## Update and verify
 
 1. Close serial monitors and upload the updated ESP32 firmware. Knock-failure

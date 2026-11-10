@@ -57,3 +57,26 @@ test("live entry stays neutral, follows dial updates, and clears when offline or
   await write("vault/status", status("LOCKED"));
   await expect(live.locator(".empty")).toHaveCount(3);
 });
+
+test("retransmitted close calls display once while later identical guesses remain separate", async ({ page }) => {
+  const now = Date.now();
+  await write("vault", { status: status("LOCKED", {attempts: 3}), events: {
+    armed: {type: "armed", at: now-10000, roundId: "r"},
+    a: {type: "attempt", at: now-9000, roundId: "r", attempt: 1, guess: "123", feedback: "220"},
+    b: {type: "attempt", at: now-8000, roundId: "r", attempt: 2, guess: "345", feedback: "100"},
+    retry: {type: "attempt", at: now-7000, roundId: "r", attempt: 2, guess: "345"},
+    c: {type: "attempt", at: now-6000, roundId: "r", attempt: 3, guess: "127", feedback: "220"},
+  }});
+  await page.goto("/");
+  const panel = page.locator(".attempts-panel");
+  await expect(panel.locator(".count-pill")).toHaveText("3");
+  await expect(panel.locator(".attempt-index")).toHaveText(["#03","#02","#01"]);
+  await expect(panel.getByRole("group", {name: "Guess 345",exact:true})).toHaveCount(1);
+  await expect(panel.getByRole("group", {name: "Guess 345",exact:true}).locator("span"))
+    .toHaveClass(["feedback-present","feedback-absent","feedback-absent"]);
+  await page.reload();
+  await expect(panel.locator(".count-pill")).toHaveText("3");
+  await write("vault/events/d", {type:"attempt",at:now-1000,roundId:"r",attempt:4,guess:"345",feedback:"100"});
+  await expect(panel.locator(".count-pill")).toHaveText("4");
+  await expect(panel.getByRole("group", {name:"Guess 345",exact:true})).toHaveCount(2);
+});

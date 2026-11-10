@@ -68,5 +68,9 @@ int main() {
     incoming(VP_ACK,nullptr,0);assert(Serial1.outgoing.empty()); // do not ACK/NAK malformed ACKs
     incoming(VP_STATUS,status,VP_LEN_STATUS);assert(received==2 && output().type==VP_ACK);
     puts("PASS ESP32 rollover, partial/corrupt frames, length validation and parser recovery");
+    // ACK every valid retransmission; application-level attempt dedup runs in cloud_on_message.
+    reset();attempt[5]=VP_DIGIT_PRESENT;
+    incoming(VP_ATTEMPT,attempt,VP_LEN_ATTEMPT);assert(output().type==VP_ACK);
+    incoming(VP_ATTEMPT,attempt,VP_LEN_ATTEMPT);assert(output().type==VP_ACK && received==2);
     test_runtime_reset();
 }
