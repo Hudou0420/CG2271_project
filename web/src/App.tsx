@@ -57,6 +57,8 @@ import {
 import { previewData } from "./preview";
 
 type Api = Awaited<ReturnType<typeof connectVault>>;
+type FeedbackTone = "progress" | "success" | "warning" | "error";
+
 type Modal = "owner" | "scores" | "help" | "connection" | null;
 const isPreview = new URLSearchParams(location.search).get("preview") === "1";
 const defaultPreview = (new URLSearchParams(location.search).get("state") ||
@@ -161,6 +163,7 @@ export default function App() {
   const [modal, setModal] = useState<Modal>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<FeedbackTone>("progress");
   const [busy, setBusy] = useState(false);
   const commandInFlight = useRef(false);
   const [sound, setSound] = useState(false);
@@ -267,6 +270,7 @@ export default function App() {
       pending.current = null;
       commandInFlight.current = false;
       setBusy(false);
+      setNoticeTone("success");
       setNotice(
         command.expected === "LOCKED"
           ? "Round armed. Ready for the first knock."
@@ -318,6 +322,7 @@ export default function App() {
     commandInFlight.current = true;
     setBusy(true);
     setError("");
+    setNoticeTone("progress");
     setNotice("Sending to the vault…");
     const after = statusRef.current.updatedAt || 0;
     try {
@@ -330,6 +335,7 @@ export default function App() {
       if (!result.ok) {
         commandInFlight.current = false;
         setBusy(false);
+        setNoticeTone(result.result.startsWith("timeout:") ? "warning" : "error");
         setNotice(result.result);
         return;
       }
@@ -341,6 +347,7 @@ export default function App() {
         current.espOnline &&
         current.mcuOnline
       ) {
+        setNoticeTone("success");
         setNotice(
           action === "arm"
             ? "Round armed. Ready for the first knock."
@@ -355,6 +362,7 @@ export default function App() {
         pending.current = null;
         commandInFlight.current = false;
         setBusy(false);
+        setNoticeTone("warning");
         setNotice(
           "Delivered, but the state wasn’t confirmed. Check the vault before trying again.",
         );
@@ -441,7 +449,7 @@ export default function App() {
             </button>
           </div>
         )}
-        {error && (
+        {error && modal !== "owner" && (
           <div className="error-banner" role="alert">
             <WifiOff size={17} />
             <span>{error}</span>
@@ -450,9 +458,12 @@ export default function App() {
             </button>
           </div>
         )}
-        {notice && (
-          <div className="notice-banner" role="status">
-            <Check size={17} />
+        {notice && modal !== "owner" && (
+          <div
+            className={`notice-banner feedback-${noticeTone}`}
+            role={noticeTone === "error" ? "alert" : "status"}
+          >
+            {noticeTone === "success" ? <Check size={17} /> : <CircleHelp size={17} />}
             <span>{notice}</span>
             <button
               aria-label="Dismiss notification"
@@ -735,6 +746,9 @@ export default function App() {
             enabled={controls}
             status={status}
             busy={busy}
+            notice={notice}
+            noticeTone={noticeTone}
+            error={error}
             run={command}
             report={setError}
           />
@@ -838,6 +852,9 @@ function OwnerPanel({
   enabled,
   status,
   busy,
+  notice,
+  noticeTone,
+  error,
   run,
   report,
 }: {
@@ -848,6 +865,9 @@ function OwnerPanel({
   enabled: boolean;
   status: Status;
   busy: boolean;
+  notice: string;
+  noticeTone: FeedbackTone;
+  error: string;
   run: (
     action: "arm" | "disarm",
     code?: string,
@@ -1053,6 +1073,22 @@ function OwnerPanel({
         >
           Disarm and return to standby
         </button>
+        {(error || notice) && (
+          <div
+            className={`command-feedback feedback-${error ? "error" : noticeTone}`}
+            role={error || noticeTone === "error" ? "alert" : "status"}
+            aria-atomic="true"
+          >
+            {error ? <WifiOff size={17} /> : noticeTone === "success" ? (
+              <Check size={17} />
+            ) : noticeTone === "progress" ? (
+              <Clock3 size={17} />
+            ) : (
+              <CircleHelp size={17} />
+            )}
+            <span>{error || notice}</span>
+          </div>
+        )}
         {!enabled && !busy && (
           <p className="muted-note">
             {!status.espOnline || !status.mcuOnline

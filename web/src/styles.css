@@ -967,6 +967,40 @@ footer button:hover {
   color: inherit;
   padding: 4px;
 }
+.command-feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid #626f4a;
+  border-radius: 4px;
+  padding: 12px 14px;
+  background: #2a341f;
+  color: #c2cbb2;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.command-feedback > svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.command-feedback > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.feedback-success {
+  border-color: #849c47;
+  color: var(--lime);
+}
+.feedback-warning {
+  border-color: #9c8747;
+  background: #352f20;
+  color: #e4ce95;
+}
+.feedback-error {
+  border-color: #9a5c3f;
+  background: #3a2b21;
+  color: #ffbf9d;
+}
 .preview-bar {
   display: flex;
   align-items: center;

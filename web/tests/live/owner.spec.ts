@@ -100,6 +100,10 @@ test("owner sign-in, leading-zero arm, authoritative state and disarm round trip
   await expect(
     page.getByRole("img", { name: "The vault is idle" }),
   ).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("status")).toContainText(
+    "Command delivered. Waiting for the state to update…",
+  );
+  await expect(page.locator(".notice-banner")).toHaveCount(0);
   await write(`vault/events/${key}`, {
     type: "armed",
     player: "Test challenger",
@@ -110,9 +114,14 @@ test("owner sign-in, leading-zero arm, authoritative state and disarm round trip
   await expect(
     page.getByRole("img", { name: "The vault is locked" }),
   ).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("status")).toContainText(
+    "Round armed. Ready for the first knock.",
+  );
+  await expect(page.locator(".command-feedback")).toHaveClass(/feedback-success/);
   await page
     .getByRole("button", { name: "Disarm and return to standby" })
     .click();
+  await expect(page.getByRole("dialog").getByRole("status")).not.toContainText("Round armed");
   await expect
     .poll(async () => Object.keys((await read("vault/commands")) || {}).length)
     .toBe(1);
@@ -126,7 +135,9 @@ test("owner sign-in, leading-zero arm, authoritative state and disarm round trip
   await expect(
     page.getByRole("img", { name: "The vault is idle" }),
   ).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("status")).toContainText("Vault is on standby.");
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("status")).toContainText("Vault is on standby.");
   await page.reload();
   await page.getByRole("button", { name: "Owner panel" }).click();
   await expect(
@@ -183,7 +194,7 @@ test("owner gets command rejection feedback and controls stay disabled during al
     result: "rejected: link busy",
     at: Date.now(),
   });
-  await expect(page.getByRole("status")).toContainText("rejected: link busy");
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("rejected: link busy");
   await write("vault/status", liveStatus("ALARM"));
   await expect(
     page.getByRole("button", { name: "Arm the vault", exact: true }),
@@ -205,7 +216,7 @@ test("a missing acknowledgement times out once and never resends the command", a
   await page
     .getByRole("button", { name: "Arm the vault", exact: true })
     .click();
-  await expect(page.getByRole("status")).toContainText("timeout:", {
+  await expect(page.getByRole("dialog").getByRole("status")).toContainText("timeout:", {
     timeout: 13000,
   });
   expect(Object.keys(await read("vault/commands")).length).toBe(1);
@@ -361,6 +372,62 @@ test("rapid repeated arm clicks queue one command", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Waiting for the vault…", exact: true })).toBeDisabled();
   // Wait for the command lifecycle to settle so a transient queue size of one
   // cannot hide later duplicate writes. This exercises the real API timeout.
-  await expect(page.getByRole("status")).toContainText("timeout:", { timeout: 13000 });
+  await expect(page.getByRole("dialog").getByRole("status")).toContainText("timeout:", { timeout: 13000 });
   expect(Object.keys(await read("vault/commands"))).toHaveLength(1);
+});
+
+for (const width of [1280, 390]) {
+  test(`owner sees confirmed arm feedback inside the panel at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 850 });
+    await signIn(page);
+    await page.getByLabel("Challenger", { exact: true }).fill("Player");
+    await page.getByLabel("Secret code", { exact: true }).fill("123");
+    await page.getByRole("button", { name: "Arm the vault", exact: true }).click();
+    await expect.poll(async () => Object.keys((await read("vault/commands")) || {}).length).toBe(1);
+    const key = Object.keys(await read("vault/commands"))[0];
+    // State can arrive before the command acknowledgement.
+    await write("vault/status", liveStatus("LOCKED"));
+    await expect(page.getByRole("img", { name: "The vault is locked" })).toBeVisible();
+    await expect(page.locator(".command-feedback")).not.toHaveClass(/feedback-success/);
+    await write(`vault/commandResults/${key}`, { result: "delivered", at: Date.now() });
+    const feedback = page.getByRole("dialog").getByRole("status");
+    await expect(feedback).toContainText("Round armed. Ready for the first knock.");
+    await expect(feedback).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("owner-arm-success.png"), fullPage: true });
+  });
+}
+
+test("delivered command without confirmed state shows a warning inside the owner panel", async ({ page }) => {
+  await signIn(page);
+  await page.getByLabel("Challenger", { exact: true }).fill("Player");
+  await page.getByLabel("Secret code", { exact: true }).fill("123");
+  await page.getByRole("button", { name: "Arm the vault", exact: true }).click();
+  await expect.poll(async () => Object.keys((await read("vault/commands")) || {}).length).toBe(1);
+  const key = Object.keys(await read("vault/commands"))[0];
+  await write(`vault/commandResults/${key}`, { result: "delivered", at: Date.now() });
+  const feedback = page.getByRole("dialog").getByRole("status");
+  await expect(feedback).toContainText("Waiting for the state to update");
+  await expect(feedback).toContainText("Delivered, but the state wasn’t confirmed.", { timeout: 14000 });
+  await expect(feedback).toHaveClass(/feedback-warning/);
+  expect(Object.keys(await read("vault/commands"))).toHaveLength(1);
+});
+
+test("command API errors appear inside the owner panel", async ({ page }) => {
+  await page.route("**/vault-api.js", route => route.fulfill({
+    contentType: "text/javascript",
+    body: `import { connectVault as connect } from "/vault-api.js?actual";
+      export async function connectVault(...args) {
+        const api = await connect(...args);
+        return { ...api, arm: async () => { throw new Error("Request failed"); } };
+      }`,
+  }));
+  await signIn(page);
+  await page.getByLabel("Challenger", { exact: true }).fill("Player");
+  await page.getByLabel("Secret code", { exact: true }).fill("123");
+  await page.getByRole("button", { name: "Arm the vault", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Couldn’t complete that request.");
+  await expect(page.locator(".error-banner")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("alert")).toContainText("Couldn’t complete that request.");
 });
