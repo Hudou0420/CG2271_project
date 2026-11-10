@@ -17,8 +17,8 @@
 // ---- Tamper detection -----------------------------------------------------
 #define IMU_PERIOD_MS         50     // 20 Hz sampling
 #define IMU_CALIB_SAMPLES     40     // ~2 s at rest to learn the baseline
-#define TAMPER_ACC_DEV_G      0.30f  // |a| differs from rest by more than this
-#define TAMPER_GYRO_DPS       80.0f  // or the box rotates faster than this
+#define TAMPER_ACC_DEV_G      0.1f  // |a| differs from rest by more than this
+#define TAMPER_GYRO_DPS       40.0f  // or the box rotates faster than this
 #define TAMPER_SAMPLES        4      // consecutive samples over threshold
 #define TAMPER_COOLDOWN_MS    3000   // minimum gap between TAMPER packets
 
