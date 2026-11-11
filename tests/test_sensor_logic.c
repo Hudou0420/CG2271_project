@@ -111,12 +111,38 @@ static void test_beam_filter(void)
     assert(!vault_beam_update(&filter, 1900U, true) && !filter.latched);
 }
 
+static void test_ldr_average(void)
+{
+    VaultLdrAverage filter = {0};
+    uint16_t average = 42U;
+    assert(!vault_ldr_update(&filter, 301U, &average));
+    assert(!vault_ldr_update(&filter, 4095U, &average));
+    assert(filter.count == 0U && average == 42U);
+    assert(vault_ldr_update(&filter, 0U, &average) && average == 0U);
+    assert(vault_ldr_update(&filter, 300U, &average) && average == 150U);
+    assert(!vault_ldr_update(&filter, 301U, &average));
+    assert(filter.count == 2U && average == 150U);
+    assert(vault_ldr_update(&filter, 100U, &average) && average == 133U);
+    assert(vault_ldr_update(&filter, 200U, &average) && average == 150U);
+    assert(vault_ldr_update(&filter, 150U, &average) && average == 150U);
+    assert(vault_ldr_update(&filter, 250U, &average) && average == 200U);
+    assert(vault_ldr_update(&filter, 0U, &average) && average == 140U);
+    for (unsigned i = 0; i < 10U; ++i) {
+        assert(vault_ldr_update(&filter, 300U, &average));
+    }
+    assert(average == 300U && filter.count == 5U);
+    vault_ldr_reset(&filter);
+    assert(vault_ldr_update(&filter, 60U, &average) && average == 60U);
+    puts("PASS LDR acceptance boundaries, startup, rolling average, rejection and reset");
+}
+
 int main(void)
 {
     test_round_boundaries();
     test_decoder_noise_and_bounds();
     test_existing_game_contract();
     test_beam_filter();
+    test_ldr_average();
     puts("PASS: round boundaries/reversal, bounce, invalid states, bounds, sign, existing FSM contract, beam filtering/hysteresis.");
     return 0;
 }

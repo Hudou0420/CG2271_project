@@ -75,6 +75,31 @@ int32_t vault_encoder_update(VaultEncoder *encoder, bool clk, bool dt)
     return change;
 }
 
+_Static_assert(VAULT_LDR_MAX_VALID <= 4095U &&
+               VAULT_LDR_AVERAGE_SAMPLES > 0U &&
+               VAULT_LDR_AVERAGE_SAMPLES <= UINT32_MAX / 4095U,
+               "Invalid LDR averaging configuration");
+
+void vault_ldr_reset(VaultLdrAverage *filter)
+{
+    memset(filter, 0, sizeof(*filter));
+}
+
+bool vault_ldr_update(VaultLdrAverage *filter, uint16_t raw, uint16_t *average)
+{
+    if (raw > VAULT_LDR_MAX_VALID) return false;
+    if (filter->count == VAULT_LDR_AVERAGE_SAMPLES) {
+        filter->sum -= filter->samples[filter->next];
+    } else {
+        ++filter->count;
+    }
+    filter->samples[filter->next] = raw;
+    filter->sum += raw;
+    filter->next = (filter->next + 1U) % VAULT_LDR_AVERAGE_SAMPLES;
+    *average = (uint16_t)(filter->sum / filter->count);
+    return true;
+}
+
 void vault_beam_reset(VaultBeamFilter *filter)
 {
     filter->count = 0U;

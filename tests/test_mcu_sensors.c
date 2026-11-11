@@ -14,6 +14,18 @@ static unsigned cycles,stop_after;
 static bool drain_full_queue,disarm_on_read,close_lid;
 static RawInputEvent script[32];
 static size_t script_count,script_next;
+typedef struct {
+    uint16_t raw;
+    BspStatus status;
+    VaultState state;
+    uint32_t session;
+} LdrSample;
+static const LdrSample *ldr_script;
+static size_t ldr_script_count;
+static void apply_ldr_sample(const LdrSample *sample) {
+    adc_value=sample->raw;adc_status=sample->status;
+    gGame.state=sample->state;gGame.start_ms=sample->session;
+}
 BspStatus bsp_inputs_configure(BspInput input,BspPull pull,BspEdge edge) {(void)input;(void)pull;(void)edge;return configuration_status;}
 BspStatus bsp_inputs_read_all(BspInputLevels *out) {*out=levels;return configuration_status;}
 BspStatus bsp_inputs_read(BspInput input,bool *high) {(void)input;*high=levels.sw;return BSP_OK;}
@@ -29,7 +41,7 @@ static void reset(void) {
     test_runtime_reset();raw_queue=NULL;callback=NULL;configuration_status=BSP_OK;adc_status=BSP_OK;adc_value=60;
     raw_drops=0;memset(&stats,0,sizeof(stats));memset(&gGame,0,sizeof(gGame));
     levels=(BspInputLevels){true,true,true,true};cycles=0;stop_after=4;drain_full_queue=false;disarm_on_read=false;close_lid=false;
-    script_count=script_next=0;
+    script_count=script_next=0;ldr_script=NULL;ldr_script_count=0;
     xInputQueue=xQueueCreate(INPUT_Q_LEN,sizeof(VaultEvent));xStateMutex=xSemaphoreCreateMutex();
     assert(vault_sensors_init());assert(!vault_sensors_init());
 }
@@ -51,6 +63,7 @@ static void run_input(void) {
 }
 static void delay_period(void) {
     ++cycles;
+    if(cycles<ldr_script_count)apply_ldr_sample(&ldr_script[cycles]);
     if(close_lid && cycles==3) {adc_value=230;gGame.state=ST_ALARM;}
     if(drain_full_queue && cycles==3) {VaultEvent e;assert(xQueueReceive(xInputQueue,&e,0));}
     if(cycles==stop_after)longjmp(stop,1);
@@ -109,7 +122,7 @@ static void beam_service(void) {
     assert(!uxQueueMessagesWaiting(xInputQueue));
 #endif
 #if VAULT_LDR_BEAM_DETECTION_ENABLED
-    reset();gGame.state=ST_LOCKED;gGame.start_ms=1;close_lid=true;run_tripwire();
+    reset();gGame.state=ST_LOCKED;gGame.start_ms=1;close_lid=true;stop_after=8;run_tripwire();
     assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN);
     assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED);
     assert(!uxQueueMessagesWaiting(xInputQueue));
@@ -118,4 +131,66 @@ static void beam_service(void) {
     reset();adc_status=BSP_NOT_READY;run_tripwire();assert(!stats.ldr_valid && stats.adc_errors==4);
     puts("PASS production ADC failures, beam enable gate, one-shot event, retry and disarm cancellation");
 }
-int main(void){taps_and_button();overflow_and_failure();beam_service();test_runtime_reset();}
+static void run_ldr_samples(const LdrSample *samples, size_t count) {
+    ldr_script=samples;ldr_script_count=count;stop_after=(unsigned)count;
+    apply_ldr_sample(&samples[0]);run_tripwire();
+}
+#define LDR(raw) {raw,BSP_OK,ST_LOCKED,1U}
+static void ldr_filter_service(void) {
+    reset();
+    const LdrSample rejected[]={LDR(230),LDR(301),LDR(4095)};
+    run_ldr_samples(rejected,3);
+    assert(!stats.ldr_valid && stats.ldr_raw==230 && stats.adc_errors==0);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+
+    reset();
+    const LdrSample boundary[]={LDR(0),LDR(300)};
+    run_ldr_samples(boundary,2);
+    assert(stats.ldr_valid && stats.ldr_raw==150);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+
+    reset();
+    const LdrSample gaps[]={LDR(60),LDR(60),LDR(4095),LDR(60),LDR(60)};
+    run_ldr_samples(gaps,5);
+    assert(stats.ldr_valid && stats.ldr_raw==60);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+
+    reset();
+    const LdrSample failure[]={LDR(230),{0,BSP_NOT_READY,ST_LOCKED,1U},LDR(60)};
+    run_ldr_samples(failure,3);
+    assert(stats.ldr_valid && stats.ldr_raw==60 && stats.adc_errors==1);
+
+    reset();
+    const LdrSample disarmed[]={LDR(230),{60,BSP_OK,ST_IDLE,1U}};
+    run_ldr_samples(disarmed,2);
+    assert(stats.ldr_valid && stats.ldr_raw==60);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+
+    reset();
+    const LdrSample transitions[]={LDR(230),{60,BSP_OK,ST_IDLE,1U},
+        {230,BSP_OK,ST_IDLE,1U},LDR(60)};
+    run_ldr_samples(transitions,4);
+    assert(stats.ldr_valid && stats.ldr_raw==60);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+
+    reset();
+    const LdrSample new_round[]={LDR(60),LDR(60),{230,BSP_OK,ST_LOCKED,2U}};
+    run_ldr_samples(new_round,3);
+    assert(stats.ldr_valid && stats.ldr_raw==230);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+
+#if VAULT_LDR_BEAM_DETECTION_ENABLED
+    reset();
+    const LdrSample open_close[]={LDR(230),LDR(230),LDR(230),LDR(230),LDR(230),
+        LDR(60),LDR(60),LDR(60),LDR(60),LDR(60),LDR(60),LDR(60),
+        LDR(4095),LDR(230),LDR(230),LDR(230),LDR(230),LDR(230)};
+    run_ldr_samples(open_close,sizeof(open_close)/sizeof(open_close[0]));
+    VaultEvent e;
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==550);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED && e.tick_ms==800);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    assert(stats.ldr_valid && stats.ldr_raw==230 && stats.adc_errors==0);
+#endif
+    puts("PASS production LDR smoothing, rejected spikes, debounce, failures and session resets");
+}
+int main(void){taps_and_button();overflow_and_failure();beam_service();ldr_filter_service();test_runtime_reset();}

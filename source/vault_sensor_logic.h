@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "vault_sensor_config.h"
 
 /* Pure C processing shared by the RTOS service and host regression tests. */
 typedef struct {
@@ -26,6 +27,17 @@ void vault_encoder_resync(VaultEncoder *encoder, bool clk, bool dt);
  * Origin is startup; reversing across a boundary reverses its event.
  */
 int32_t vault_encoder_update(VaultEncoder *encoder, bool clk, bool dt);
+
+typedef struct {
+    uint16_t samples[VAULT_LDR_AVERAGE_SAMPLES];
+    uint32_t sum;
+    uint32_t count;
+    uint32_t next;
+} VaultLdrAverage;
+
+void vault_ldr_reset(VaultLdrAverage *filter);
+/* Reject high readings without changing history or the caller's last average. */
+bool vault_ldr_update(VaultLdrAverage *filter, uint16_t raw, uint16_t *average);
 
 typedef struct {
     uint16_t threshold;
