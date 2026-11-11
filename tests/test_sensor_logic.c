@@ -89,7 +89,7 @@ static void test_existing_game_contract(void)
 
 static void test_beam_filter(void)
 {
-    VaultBeamFilter filter = {2000U, 100U, 3U, 0U, true, false};
+    VaultBeamFilter filter = {2000U, 100U, 3U, 0U, true, false, 3U};
     assert(!vault_beam_update(&filter, 1900U, true));
     assert(!vault_beam_update(&filter, 1900U, true));
     assert(!vault_beam_update(&filter, 2050U, true)); /* Not consecutive. */
@@ -99,8 +99,13 @@ static void test_beam_filter(void)
     assert(!vault_beam_update(&filter, 1900U, true)); /* Latch prevents flood. */
     assert(!vault_beam_update(&filter, 2050U, true)); /* Inside hysteresis. */
     assert(filter.latched);
-    assert(!vault_beam_update(&filter, 2100U, true));
-    assert(!filter.latched);
+    assert(!vault_beam_update(&filter, 2100U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 2100U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 2050U, true) && filter.latched); /* Interrupt closure. */
+    assert(filter.count == 0U);
+    assert(!vault_beam_update(&filter, 2100U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 2100U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 2100U, true) && !filter.latched);
     assert(!vault_beam_update(&filter, 0U, false));
     assert(filter.count == 0U && !filter.latched);
     filter.blocked_when_low = false;
@@ -108,6 +113,8 @@ static void test_beam_filter(void)
     assert(!vault_beam_update(&filter, 2500U, true));
     assert(vault_beam_update(&filter, 2500U, true));
     assert(!vault_beam_update(&filter, 1950U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 1900U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 1900U, true) && filter.latched);
     assert(!vault_beam_update(&filter, 1900U, true) && !filter.latched);
 }
 

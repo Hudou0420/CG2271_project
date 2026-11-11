@@ -15,7 +15,8 @@ _Static_assert(VAULT_ENCODER_DIRECTION == 1 || VAULT_ENCODER_DIRECTION == -1,
                "Encoder direction must be +1 or -1");
 _Static_assert(VAULT_LDR_THRESHOLD <= 4095U &&
                VAULT_LDR_THRESHOLD + VAULT_LDR_HYSTERESIS <= 4095U &&
-               VAULT_LDR_BLOCKED_SAMPLES > 0U, "Invalid beam-filter configuration");
+               VAULT_LDR_BLOCKED_SAMPLES > 0U && VAULT_LDR_CLEAR_SAMPLES > 0U,
+               "Invalid beam-filter configuration");
 
 typedef struct {
     BspInput input;
@@ -182,7 +183,8 @@ void vault_tripwire_task(void *argument)
 {
     (void)argument;
     VaultBeamFilter filter = {VAULT_LDR_THRESHOLD, VAULT_LDR_HYSTERESIS,
-        VAULT_LDR_BLOCKED_SAMPLES, 0U, VAULT_LDR_BLOCKED_WHEN_LOW != 0, false};
+        VAULT_LDR_BLOCKED_SAMPLES, 0U, VAULT_LDR_BLOCKED_WHEN_LOW != 0, false,
+        VAULT_LDR_CLEAR_SAMPLES};
     VaultLdrAverage average = {0};
     bool was_armed = false;
     bool reported_open = false;
@@ -232,7 +234,14 @@ void vault_tripwire_task(void *argument)
             accepted = vault_ldr_update(&average, raw, &stats.ldr_raw);
             stats.ldr_valid = accepted;
             if (accepted && VAULT_LDR_BEAM_DETECTION_ENABLED) {
+                bool was_open = filter.latched;
                 (void)vault_beam_update(&filter, stats.ldr_raw, armed);
+                if (filter.latched != was_open) {
+                    /* Each confirmed lid state starts with fresh averaging history.
+                     * Keep the latch and pending event intact while clearing samples.
+                     */
+                    vault_ldr_reset(&average);
+                }
             }
         } else {
             bsp_light_cancel();
@@ -240,7 +249,7 @@ void vault_tripwire_task(void *argument)
             ++stats.adc_errors;
             vault_ldr_reset(&average);
         }
-        /* Rejected readings and ADC errors cannot confirm a lid opening. */
+        /* Rejected readings and ADC errors break either confirmation sequence. */
         if (!accepted) filter.count = 0U;
         if (VAULT_LDR_BEAM_DETECTION_ENABLED && accepted &&
             pending.type == EV_NONE && filter.latched != reported_open) {

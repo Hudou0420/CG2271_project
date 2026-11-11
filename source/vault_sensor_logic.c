@@ -117,7 +117,12 @@ bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed)
         (uint32_t)raw >= (uint32_t)filter->threshold + filter->hysteresis :
         (uint32_t)raw + filter->hysteresis <= filter->threshold;
     if (filter->latched) {
-        if (clear) vault_beam_reset(filter);
+        if (!clear) {
+            filter->count = 0U;
+        } else {
+            if (filter->count < filter->clear_samples) ++filter->count;
+            if (filter->count >= filter->clear_samples) vault_beam_reset(filter);
+        }
         return false;
     }
     if (!blocked) {
@@ -127,6 +132,7 @@ bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed)
     if (filter->count < filter->blocked_samples) ++filter->count;
     if (filter->count >= filter->blocked_samples) {
         filter->latched = true;
+        filter->count = 0U;
         return true;
     }
     return false;

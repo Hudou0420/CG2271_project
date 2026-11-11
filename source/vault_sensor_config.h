@@ -26,6 +26,7 @@
 #define VAULT_LDR_THRESHOLD           80U /* Open <=80; user-selected threshold. */
 #define VAULT_LDR_HYSTERESIS          100U /* Closed >=180. */
 #define VAULT_LDR_BLOCKED_SAMPLES     3U
+#define VAULT_LDR_CLEAR_SAMPLES       3U
 
 /* Real hardware and fake-event self-test are mutually exclusive in main. */
 #ifndef VAULT_LOG_INPUT_EVENTS

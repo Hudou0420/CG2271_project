@@ -187,9 +187,49 @@ static void ldr_filter_service(void) {
     run_ldr_samples(open_close,sizeof(open_close)/sizeof(open_close[0]));
     VaultEvent e;
     assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==550);
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED && e.tick_ms==800);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED && e.tick_ms==750);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==230 && stats.adc_errors==0);
+
+    /* Three high readings close immediately after opening; the subsequent low
+     * reading must likewise start a fresh average after closure.
+     */
+    reset();
+    const LdrSample fresh_states[]={LDR(60),LDR(60),LDR(60),
+        LDR(230),LDR(230),LDR(230),LDR(60)};
+    run_ldr_samples(fresh_states,7);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==100);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED && e.tick_ms==250);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    assert(stats.ldr_valid && stats.ldr_raw==60);
+
+    reset();
+    const LdrSample repeated_states[]={LDR(60),LDR(60),LDR(60),
+        LDR(230),LDR(230),LDR(230),LDR(60),LDR(60),LDR(60),LDR(60)};
+    run_ldr_samples(repeated_states,10);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==400);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+
+    /* Two closure confirmations on either side of a bad read cannot combine. */
+    for(unsigned failure=0;failure<2;++failure) {
+        reset();
+        LdrSample interrupted[]={LDR(60),LDR(60),LDR(60),LDR(230),LDR(230),
+            LDR(301),LDR(230),LDR(230)};
+        if(failure)interrupted[5]=(LdrSample){0,BSP_NOT_READY,ST_LOCKED,1U};
+        run_ldr_samples(interrupted,8);
+        assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN);
+        assert(!uxQueueMessagesWaiting(xInputQueue));
+        assert(stats.adc_errors==failure);
+    }
+
+    reset();
+    const LdrSample all_high[]={LDR(60),LDR(60),LDR(60),LDR(301),LDR(4095),LDR(4095)};
+    run_ldr_samples(all_high,6);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    assert(!stats.ldr_valid && stats.adc_errors==0);
 #endif
     puts("PASS production LDR smoothing, rejected spikes, debounce, failures and session resets");
 }

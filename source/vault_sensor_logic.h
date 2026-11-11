@@ -46,10 +46,11 @@ typedef struct {
     uint16_t count;
     bool blocked_when_low;
     bool latched;
+    uint16_t clear_samples;
 } VaultBeamFilter;
 
 void vault_beam_reset(VaultBeamFilter *filter);
-/* One true result per confirmed break; clear light beyond hysteresis releases latch. */
+/* One true result per confirmed opening; consecutive clear samples release latch. */
 bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed);
 
 #endif
