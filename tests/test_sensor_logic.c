@@ -89,22 +89,39 @@ static void test_existing_game_contract(void)
 
 static void test_beam_filter(void)
 {
-    VaultBeamFilter filter = {80U, 250U, 350U, false};
-    assert(!vault_beam_update(&filter, 80U, true) && !filter.latched);
-    assert(vault_beam_update(&filter, 79U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 0U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 80U, true) && !filter.latched);
-    assert(!vault_beam_update(&filter, 250U, true) && !filter.latched);
-    assert(vault_beam_update(&filter, 251U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 350U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 351U, true) && !filter.latched);
-    assert(!vault_beam_update(&filter, 4095U, true) && !filter.latched);
-    assert(!vault_beam_update(&filter, 130U, true) && !filter.latched);
-    assert(vault_beam_update(&filter, 30U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 0U, false) && !filter.latched);
-    assert(vault_beam_update(&filter, 350U, true) && filter.latched);
+    const uint16_t opens[] = {0U, 79U, 251U, 350U};
+    const uint16_t closed[] = {80U, 81U, 250U, 351U, 4095U};
+    for (unsigned i = 0; i < sizeof(opens)/sizeof(opens[0]); ++i) {
+        VaultBeamFilter filter = {80U, 250U, 350U, 3U, 0U, false};
+        assert(!vault_beam_update(&filter, opens[i], true) && !filter.latched);
+        assert(!vault_beam_update(&filter, opens[i], true) && !filter.latched);
+        assert(vault_beam_update(&filter, opens[i], true) && filter.latched);
+        assert(!vault_beam_update(&filter, opens[i], true) && filter.count == 0U);
+        for (unsigned j = 0; j < sizeof(closed)/sizeof(closed[0]); ++j) {
+            filter.latched = true;
+            assert(!vault_beam_update(&filter, closed[j], true) && filter.latched);
+            assert(!vault_beam_update(&filter, closed[j], true) && filter.latched);
+            assert(!vault_beam_update(&filter, closed[j], true) && !filter.latched);
+        }
+    }
+    VaultBeamFilter filter = {80U, 250U, 350U, 3U, 0U, false};
+    assert(!vault_beam_update(&filter, 30U, true));
+    assert(!vault_beam_update(&filter, 290U, true));
+    assert(!vault_beam_update(&filter, 130U, true) && filter.count == 0U);
+    assert(!vault_beam_update(&filter, 30U, true));
+    assert(!vault_beam_update(&filter, 290U, true));
+    assert(vault_beam_update(&filter, 44U, true)); /* Same classification, different values. */
+    assert(!vault_beam_update(&filter, 130U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 410U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 274U, true) && filter.count == 0U);
+    assert(!vault_beam_update(&filter, 130U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 410U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 436U, true) && !filter.latched);
+    assert(!vault_beam_update(&filter, 30U, true));
+    assert(!vault_beam_update(&filter, 30U, false) && filter.count == 0U);
+    assert(!vault_beam_update(&filter, 30U, true) && !filter.latched);
     vault_beam_reset(&filter);
-    assert(!filter.latched);
+    assert(!filter.latched && filter.count == 0U);
 }
 
 int main(void)

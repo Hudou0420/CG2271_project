@@ -78,6 +78,7 @@ int32_t vault_encoder_update(VaultEncoder *encoder, bool clk, bool dt)
 void vault_beam_reset(VaultBeamFilter *filter)
 {
     filter->latched = false;
+    filter->count = 0U;
 }
 
 bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed)
@@ -86,8 +87,15 @@ bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed)
         vault_beam_reset(filter);
         return false;
     }
-    bool was_open = filter->latched;
-    filter->latched = raw < filter->threshold ||
-                      (raw > filter->high_threshold && raw <= filter->close_above);
-    return filter->latched && !was_open;
+    bool open = raw < filter->threshold ||
+                (raw > filter->high_threshold && raw <= filter->close_above);
+    if (open == filter->latched) {
+        filter->count = 0U;
+        return false;
+    }
+    if (filter->count < filter->confirm_samples) ++filter->count;
+    if (filter->count < filter->confirm_samples) return false;
+    filter->latched = open;
+    filter->count = 0U;
+    return open;
 }

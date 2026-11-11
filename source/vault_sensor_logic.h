@@ -31,12 +31,15 @@ typedef struct {
     uint16_t threshold;
     uint16_t high_threshold;
     uint16_t close_above;
+    uint16_t confirm_samples;
+    uint16_t count;
     bool latched;
 } VaultBeamFilter;
 
 void vault_beam_reset(VaultBeamFilter *filter);
 /* Raw < threshold or in (high_threshold, close_above] opens; otherwise closes.
- * Returns true only on opening. Disarming resets the latch. */
+ * Require confirm_samples consecutive opposite classifications to change state.
+ * Returns true only on confirmed opening. Disarming resets latch and count. */
 bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed);
 
 #endif
