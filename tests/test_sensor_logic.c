@@ -89,39 +89,26 @@ static void test_existing_game_contract(void)
 
 static void test_beam_filter(void)
 {
-    const uint16_t opens[] = {0U, 79U, 251U, 350U};
-    const uint16_t closed[] = {80U, 81U, 250U, 351U, 4095U};
-    for (unsigned i = 0; i < sizeof(opens)/sizeof(opens[0]); ++i) {
-        VaultBeamFilter filter = {80U, 250U, 350U, 3U, 0U, false};
-        assert(!vault_beam_update(&filter, opens[i], true) && !filter.latched);
-        assert(!vault_beam_update(&filter, opens[i], true) && !filter.latched);
-        assert(vault_beam_update(&filter, opens[i], true) && filter.latched);
-        assert(!vault_beam_update(&filter, opens[i], true) && filter.count == 0U);
-        for (unsigned j = 0; j < sizeof(closed)/sizeof(closed[0]); ++j) {
-            filter.latched = true;
-            assert(!vault_beam_update(&filter, closed[j], true) && filter.latched);
-            assert(!vault_beam_update(&filter, closed[j], true) && filter.latched);
-            assert(!vault_beam_update(&filter, closed[j], true) && !filter.latched);
-        }
-    }
-    VaultBeamFilter filter = {80U, 250U, 350U, 3U, 0U, false};
-    assert(!vault_beam_update(&filter, 30U, true));
-    assert(!vault_beam_update(&filter, 290U, true));
-    assert(!vault_beam_update(&filter, 130U, true) && filter.count == 0U);
-    assert(!vault_beam_update(&filter, 30U, true));
-    assert(!vault_beam_update(&filter, 290U, true));
-    assert(vault_beam_update(&filter, 44U, true)); /* Same classification, different values. */
-    assert(!vault_beam_update(&filter, 130U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 410U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 274U, true) && filter.count == 0U);
-    assert(!vault_beam_update(&filter, 130U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 410U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 436U, true) && !filter.latched);
-    assert(!vault_beam_update(&filter, 30U, true));
-    assert(!vault_beam_update(&filter, 30U, false) && filter.count == 0U);
-    assert(!vault_beam_update(&filter, 30U, true) && !filter.latched);
-    vault_beam_reset(&filter);
-    assert(!filter.latched && filter.count == 0U);
+    VaultBeamFilter filter = {2000U, 100U, 3U, 0U, true, false};
+    assert(!vault_beam_update(&filter, 1900U, true));
+    assert(!vault_beam_update(&filter, 1900U, true));
+    assert(!vault_beam_update(&filter, 2050U, true)); /* Not consecutive. */
+    assert(!vault_beam_update(&filter, 1900U, true));
+    assert(!vault_beam_update(&filter, 1900U, true));
+    assert(vault_beam_update(&filter, 1900U, true));
+    assert(!vault_beam_update(&filter, 1900U, true)); /* Latch prevents flood. */
+    assert(!vault_beam_update(&filter, 2050U, true)); /* Inside hysteresis. */
+    assert(filter.latched);
+    assert(!vault_beam_update(&filter, 2100U, true));
+    assert(!filter.latched);
+    assert(!vault_beam_update(&filter, 0U, false));
+    assert(filter.count == 0U && !filter.latched);
+    filter.blocked_when_low = false;
+    assert(!vault_beam_update(&filter, 2500U, true));
+    assert(!vault_beam_update(&filter, 2500U, true));
+    assert(vault_beam_update(&filter, 2500U, true));
+    assert(!vault_beam_update(&filter, 1950U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 1900U, true) && !filter.latched);
 }
 
 int main(void)
@@ -130,6 +117,6 @@ int main(void)
     test_decoder_noise_and_bounds();
     test_existing_game_contract();
     test_beam_filter();
-    puts("PASS: round boundaries/reversal, bounce, invalid states, bounds, sign, existing FSM contract, direct lid thresholds/full ADC range.");
+    puts("PASS: round boundaries/reversal, bounce, invalid states, bounds, sign, existing FSM contract, beam filtering/hysteresis.");
     return 0;
 }
