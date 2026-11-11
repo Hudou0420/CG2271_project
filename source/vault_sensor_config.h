@@ -17,7 +17,6 @@
 
 #define VAULT_LDR_SAMPLE_MS           50U
 #define VAULT_LDR_CONVERSION_MS       10U
-#define VAULT_LDR_MAX_VALID           300U /* Discard higher ADC readings. */
 #define VAULT_LDR_AVERAGE_SAMPLES     5U
 #ifndef VAULT_LDR_BEAM_DETECTION_ENABLED
 #define VAULT_LDR_BEAM_DETECTION_ENABLED 1 /* Lid readings measured on the assembled box. */

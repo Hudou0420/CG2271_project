@@ -138,9 +138,9 @@ static void run_ldr_samples(const LdrSample *samples, size_t count) {
 #define LDR(raw) {raw,BSP_OK,ST_LOCKED,1U}
 static void ldr_filter_service(void) {
     reset();
-    const LdrSample rejected[]={LDR(230),LDR(301),LDR(4095)};
-    run_ldr_samples(rejected,3);
-    assert(!stats.ldr_valid && stats.ldr_raw==230 && stats.adc_errors==0);
+    const LdrSample full_range[]={LDR(230),LDR(301),LDR(4095)};
+    run_ldr_samples(full_range,3);
+    assert(stats.ldr_valid && stats.ldr_raw==1542 && stats.adc_errors==0);
     assert(!uxQueueMessagesWaiting(xInputQueue));
 
     reset();
@@ -150,9 +150,9 @@ static void ldr_filter_service(void) {
     assert(!uxQueueMessagesWaiting(xInputQueue));
 
     reset();
-    const LdrSample gaps[]={LDR(60),LDR(60),LDR(4095),LDR(60),LDR(60)};
-    run_ldr_samples(gaps,5);
-    assert(stats.ldr_valid && stats.ldr_raw==60);
+    const LdrSample spike[]={LDR(60),LDR(60),LDR(4095),LDR(60),LDR(60)};
+    run_ldr_samples(spike,5);
+    assert(stats.ldr_valid && stats.ldr_raw==867);
     assert(!uxQueueMessagesWaiting(xInputQueue));
 
     reset();
@@ -187,7 +187,7 @@ static void ldr_filter_service(void) {
     run_ldr_samples(open_close,sizeof(open_close)/sizeof(open_close[0]));
     VaultEvent e;
     assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==550);
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED && e.tick_ms==750);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED && e.tick_ms==700);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==230 && stats.adc_errors==0);
 
@@ -216,7 +216,7 @@ static void ldr_filter_service(void) {
     for(unsigned failure=0;failure<2;++failure) {
         reset();
         LdrSample interrupted[]={LDR(60),LDR(60),LDR(60),LDR(230),LDR(230),
-            LDR(301),LDR(230),LDR(230)};
+            LDR(4096),LDR(230),LDR(230)};
         if(failure)interrupted[5]=(LdrSample){0,BSP_NOT_READY,ST_LOCKED,1U};
         run_ldr_samples(interrupted,8);
         assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN);
@@ -228,9 +228,10 @@ static void ldr_filter_service(void) {
     const LdrSample all_high[]={LDR(60),LDR(60),LDR(60),LDR(301),LDR(4095),LDR(4095)};
     run_ldr_samples(all_high,6);
     assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED && e.tick_ms==250);
     assert(!uxQueueMessagesWaiting(xInputQueue));
-    assert(!stats.ldr_valid && stats.adc_errors==0);
+    assert(stats.ldr_valid && stats.ldr_raw==2830 && stats.adc_errors==0);
 #endif
-    puts("PASS production LDR smoothing, rejected spikes, debounce, failures and session resets");
+    puts("PASS production full-range LDR smoothing, debounce, failures and session resets");
 }
 int main(void){taps_and_button();overflow_and_failure();beam_service();ldr_filter_service();test_runtime_reset();}

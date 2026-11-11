@@ -75,8 +75,7 @@ int32_t vault_encoder_update(VaultEncoder *encoder, bool clk, bool dt)
     return change;
 }
 
-_Static_assert(VAULT_LDR_MAX_VALID <= 4095U &&
-               VAULT_LDR_AVERAGE_SAMPLES > 0U &&
+_Static_assert(VAULT_LDR_AVERAGE_SAMPLES > 0U &&
                VAULT_LDR_AVERAGE_SAMPLES <= UINT32_MAX / 4095U,
                "Invalid LDR averaging configuration");
 
@@ -87,7 +86,7 @@ void vault_ldr_reset(VaultLdrAverage *filter)
 
 bool vault_ldr_update(VaultLdrAverage *filter, uint16_t raw, uint16_t *average)
 {
-    if (raw > VAULT_LDR_MAX_VALID) return false;
+    if (raw > 4095U) return false; /* Only reject values outside the 12-bit ADC range. */
     if (filter->count == VAULT_LDR_AVERAGE_SAMPLES) {
         filter->sum -= filter->samples[filter->next];
     } else {

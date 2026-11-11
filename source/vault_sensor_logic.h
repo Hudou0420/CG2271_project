@@ -36,7 +36,7 @@ typedef struct {
 } VaultLdrAverage;
 
 void vault_ldr_reset(VaultLdrAverage *filter);
-/* Reject high readings without changing history or the caller's last average. */
+/* Average the full 12-bit ADC range; reject only out-of-range values. */
 bool vault_ldr_update(VaultLdrAverage *filter, uint16_t raw, uint16_t *average);
 
 typedef struct {

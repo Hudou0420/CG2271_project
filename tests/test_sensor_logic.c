@@ -122,12 +122,13 @@ static void test_ldr_average(void)
 {
     VaultLdrAverage filter = {0};
     uint16_t average = 42U;
-    assert(!vault_ldr_update(&filter, 301U, &average));
-    assert(!vault_ldr_update(&filter, 4095U, &average));
+    assert(!vault_ldr_update(&filter, 4096U, &average));
     assert(filter.count == 0U && average == 42U);
+    assert(vault_ldr_update(&filter, 301U, &average) && average == 301U);
+    assert(vault_ldr_update(&filter, 4095U, &average) && average == 2198U);
+    vault_ldr_reset(&filter);
     assert(vault_ldr_update(&filter, 0U, &average) && average == 0U);
     assert(vault_ldr_update(&filter, 300U, &average) && average == 150U);
-    assert(!vault_ldr_update(&filter, 301U, &average));
     assert(filter.count == 2U && average == 150U);
     assert(vault_ldr_update(&filter, 100U, &average) && average == 133U);
     assert(vault_ldr_update(&filter, 200U, &average) && average == 150U);
@@ -135,9 +136,9 @@ static void test_ldr_average(void)
     assert(vault_ldr_update(&filter, 250U, &average) && average == 200U);
     assert(vault_ldr_update(&filter, 0U, &average) && average == 140U);
     for (unsigned i = 0; i < 10U; ++i) {
-        assert(vault_ldr_update(&filter, 300U, &average));
+        assert(vault_ldr_update(&filter, 4095U, &average));
     }
-    assert(average == 300U && filter.count == 5U);
+    assert(average == 4095U && filter.count == 5U);
     vault_ldr_reset(&filter);
     assert(vault_ldr_update(&filter, 60U, &average) && average == 60U);
     puts("PASS LDR acceptance boundaries, startup, rolling average, rejection and reset");

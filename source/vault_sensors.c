@@ -191,9 +191,9 @@ void vault_tripwire_task(void *argument)
     VaultEvent pending = {EV_NONE, 0, 0};
     uint32_t session = 0U;
     TickType_t last_wake = xTaskGetTickCount();
-    PRINTF("Lid sensor: ADC every %u ms; discard >%u; average %u samples; "
+    PRINTF("Lid sensor: ADC every %u ms; range 0-4095; average %u samples; "
            "detection %s (open <=%u, closed >=%u).\r\n",
-           VAULT_LDR_SAMPLE_MS, VAULT_LDR_MAX_VALID, VAULT_LDR_AVERAGE_SAMPLES,
+           VAULT_LDR_SAMPLE_MS, VAULT_LDR_AVERAGE_SAMPLES,
            VAULT_LDR_BEAM_DETECTION_ENABLED ? "ENABLED" : "DISABLED",
            VAULT_LDR_THRESHOLD, VAULT_LDR_THRESHOLD + VAULT_LDR_HYSTERESIS);
     for (;;) {
