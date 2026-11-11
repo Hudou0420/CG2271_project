@@ -17,15 +17,11 @@
 
 #define VAULT_LDR_SAMPLE_MS           50U
 #define VAULT_LDR_CONVERSION_MS       10U
-#define VAULT_LDR_AVERAGE_SAMPLES     5U
+#define VAULT_LDR_MAX_VALID           200U /* Discard higher readings. */
 #ifndef VAULT_LDR_BEAM_DETECTION_ENABLED
 #define VAULT_LDR_BEAM_DETECTION_ENABLED 1 /* Lid readings measured on the assembled box. */
 #endif
-#define VAULT_LDR_BLOCKED_WHEN_LOW    1 /* Lid open / more light lowers ADC. */
 #define VAULT_LDR_THRESHOLD           80U /* Open <=80; user-selected threshold. */
-#define VAULT_LDR_HYSTERESIS          100U /* Closed >=180. */
-#define VAULT_LDR_BLOCKED_SAMPLES     3U
-#define VAULT_LDR_CLEAR_SAMPLES       3U
 
 /* Real hardware and fake-event self-test are mutually exclusive in main. */
 #ifndef VAULT_LOG_INPUT_EVENTS

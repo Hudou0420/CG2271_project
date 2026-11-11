@@ -75,33 +75,8 @@ int32_t vault_encoder_update(VaultEncoder *encoder, bool clk, bool dt)
     return change;
 }
 
-_Static_assert(VAULT_LDR_AVERAGE_SAMPLES > 0U &&
-               VAULT_LDR_AVERAGE_SAMPLES <= UINT32_MAX / 4095U,
-               "Invalid LDR averaging configuration");
-
-void vault_ldr_reset(VaultLdrAverage *filter)
-{
-    memset(filter, 0, sizeof(*filter));
-}
-
-bool vault_ldr_update(VaultLdrAverage *filter, uint16_t raw, uint16_t *average)
-{
-    if (raw > 4095U) return false; /* Only reject values outside the 12-bit ADC range. */
-    if (filter->count == VAULT_LDR_AVERAGE_SAMPLES) {
-        filter->sum -= filter->samples[filter->next];
-    } else {
-        ++filter->count;
-    }
-    filter->samples[filter->next] = raw;
-    filter->sum += raw;
-    filter->next = (filter->next + 1U) % VAULT_LDR_AVERAGE_SAMPLES;
-    *average = (uint16_t)(filter->sum / filter->count);
-    return true;
-}
-
 void vault_beam_reset(VaultBeamFilter *filter)
 {
-    filter->count = 0U;
     filter->latched = false;
 }
 
@@ -111,28 +86,8 @@ bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed)
         vault_beam_reset(filter);
         return false;
     }
-    bool blocked = filter->blocked_when_low ? raw <= filter->threshold : raw >= filter->threshold;
-    bool clear = filter->blocked_when_low ?
-        (uint32_t)raw >= (uint32_t)filter->threshold + filter->hysteresis :
-        (uint32_t)raw + filter->hysteresis <= filter->threshold;
-    if (filter->latched) {
-        if (!clear) {
-            filter->count = 0U;
-        } else {
-            if (filter->count < filter->clear_samples) ++filter->count;
-            if (filter->count >= filter->clear_samples) vault_beam_reset(filter);
-        }
-        return false;
-    }
-    if (!blocked) {
-        filter->count = 0U;
-        return false;
-    }
-    if (filter->count < filter->blocked_samples) ++filter->count;
-    if (filter->count >= filter->blocked_samples) {
-        filter->latched = true;
-        filter->count = 0U;
-        return true;
-    }
-    return false;
+    if (raw > filter->max_valid) return false;
+    bool was_open = filter->latched;
+    filter->latched = raw <= filter->threshold;
+    return filter->latched && !was_open;
 }

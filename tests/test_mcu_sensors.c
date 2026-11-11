@@ -33,7 +33,7 @@ void bsp_inputs_set_callback(BspInputCallback cb,void *context) {(void)context;c
 BspStatus bsp_light_start(void) {return adc_status;}
 BspStatus bsp_light_try_read(uint16_t *out) {
     *out=adc_value;
-    if(disarm_on_read && cycles==2)gGame.state=ST_IDLE;
+    if(disarm_on_read && cycles==0)gGame.state=ST_IDLE;
     return adc_status;
 }
 void bsp_light_cancel(void) {}
@@ -64,7 +64,7 @@ static void run_input(void) {
 static void delay_period(void) {
     ++cycles;
     if(cycles<ldr_script_count)apply_ldr_sample(&ldr_script[cycles]);
-    if(close_lid && cycles==3) {adc_value=230;gGame.state=ST_ALARM;}
+    if(close_lid && cycles==3) {adc_value=120;gGame.state=ST_ALARM;}
     if(drain_full_queue && cycles==3) {VaultEvent e;assert(xQueueReceive(xInputQueue,&e,0));}
     if(cycles==stop_after)longjmp(stop,1);
 }
@@ -109,12 +109,12 @@ static void beam_service(void) {
     reset();gGame.state=ST_LOCKED;gGame.start_ms=1;run_tripwire();
     assert(stats.ldr_valid && stats.ldr_raw==60);
 #if VAULT_LDR_BEAM_DETECTION_ENABLED
-    VaultEvent e;assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==100);
+    VaultEvent e;assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==0);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     reset();gGame.state=ST_LOCKED;gGame.start_ms=1;drain_full_queue=true;
     VaultEvent filler={EV_NONE,0,0};while(xQueueSend(xInputQueue,&filler,0)){}
-    run_tripwire();assert(stats.beam_queue_retries==1);
-    bool found=false;while(xQueueReceive(xInputQueue,&e,0))if(e.type==EV_LID_OPEN){found=true;assert(e.tick_ms==100);}
+    run_tripwire();assert(stats.beam_queue_retries==3);
+    bool found=false;while(xQueueReceive(xInputQueue,&e,0))if(e.type==EV_LID_OPEN){found=true;assert(e.tick_ms==0);}
     assert(found);
     reset();gGame.state=ST_LOCKED;gGame.start_ms=1;disarm_on_read=true;run_tripwire();
     assert(!uxQueueMessagesWaiting(xInputQueue));
@@ -136,102 +136,70 @@ static void run_ldr_samples(const LdrSample *samples, size_t count) {
     apply_ldr_sample(&samples[0]);run_tripwire();
 }
 #define LDR(raw) {raw,BSP_OK,ST_LOCKED,1U}
-static void ldr_filter_service(void) {
-    reset();
-    const LdrSample full_range[]={LDR(230),LDR(301),LDR(4095)};
-    run_ldr_samples(full_range,3);
-    assert(stats.ldr_valid && stats.ldr_raw==1542 && stats.adc_errors==0);
-    assert(!uxQueueMessagesWaiting(xInputQueue));
-
-    reset();
-    const LdrSample boundary[]={LDR(0),LDR(300)};
-    run_ldr_samples(boundary,2);
-    assert(stats.ldr_valid && stats.ldr_raw==150);
-    assert(!uxQueueMessagesWaiting(xInputQueue));
-
-    reset();
-    const LdrSample spike[]={LDR(60),LDR(60),LDR(4095),LDR(60),LDR(60)};
-    run_ldr_samples(spike,5);
-    assert(stats.ldr_valid && stats.ldr_raw==867);
-    assert(!uxQueueMessagesWaiting(xInputQueue));
-
-    reset();
-    const LdrSample failure[]={LDR(230),{0,BSP_NOT_READY,ST_LOCKED,1U},LDR(60)};
-    run_ldr_samples(failure,3);
-    assert(stats.ldr_valid && stats.ldr_raw==60 && stats.adc_errors==1);
-
-    reset();
-    const LdrSample disarmed[]={LDR(230),{60,BSP_OK,ST_IDLE,1U}};
-    run_ldr_samples(disarmed,2);
-    assert(stats.ldr_valid && stats.ldr_raw==60);
-    assert(!uxQueueMessagesWaiting(xInputQueue));
-
-    reset();
-    const LdrSample transitions[]={LDR(230),{60,BSP_OK,ST_IDLE,1U},
-        {230,BSP_OK,ST_IDLE,1U},LDR(60)};
-    run_ldr_samples(transitions,4);
-    assert(stats.ldr_valid && stats.ldr_raw==60);
-    assert(!uxQueueMessagesWaiting(xInputQueue));
-
-    reset();
-    const LdrSample new_round[]={LDR(60),LDR(60),{230,BSP_OK,ST_LOCKED,2U}};
-    run_ldr_samples(new_round,3);
-    assert(stats.ldr_valid && stats.ldr_raw==230);
-    assert(!uxQueueMessagesWaiting(xInputQueue));
-
+static void expect_lid_event(EventType type, uint32_t tick) {
 #if VAULT_LDR_BEAM_DETECTION_ENABLED
-    reset();
-    const LdrSample open_close[]={LDR(230),LDR(230),LDR(230),LDR(230),LDR(230),
-        LDR(60),LDR(60),LDR(60),LDR(60),LDR(60),LDR(60),LDR(60),
-        LDR(4095),LDR(230),LDR(230),LDR(230),LDR(230),LDR(230)};
-    run_ldr_samples(open_close,sizeof(open_close)/sizeof(open_close[0]));
     VaultEvent e;
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==550);
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED && e.tick_ms==700);
+    assert(xQueueReceive(xInputQueue,&e,0) && e.type==type && e.tick_ms==tick);
+#else
+    (void)type;(void)tick;
     assert(!uxQueueMessagesWaiting(xInputQueue));
-    assert(stats.ldr_valid && stats.ldr_raw==230 && stats.adc_errors==0);
-
-    /* Three high readings close immediately after opening; the subsequent low
-     * reading must likewise start a fresh average after closure.
-     */
-    reset();
-    const LdrSample fresh_states[]={LDR(60),LDR(60),LDR(60),
-        LDR(230),LDR(230),LDR(230),LDR(60)};
-    run_ldr_samples(fresh_states,7);
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==100);
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED && e.tick_ms==250);
-    assert(!uxQueueMessagesWaiting(xInputQueue));
-    assert(stats.ldr_valid && stats.ldr_raw==60);
-
-    reset();
-    const LdrSample repeated_states[]={LDR(60),LDR(60),LDR(60),
-        LDR(230),LDR(230),LDR(230),LDR(60),LDR(60),LDR(60),LDR(60)};
-    run_ldr_samples(repeated_states,10);
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN);
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED);
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN && e.tick_ms==400);
-    assert(!uxQueueMessagesWaiting(xInputQueue));
-
-    /* Two closure confirmations on either side of a bad read cannot combine. */
-    for(unsigned failure=0;failure<2;++failure) {
-        reset();
-        LdrSample interrupted[]={LDR(60),LDR(60),LDR(60),LDR(230),LDR(230),
-            LDR(4096),LDR(230),LDR(230)};
-        if(failure)interrupted[5]=(LdrSample){0,BSP_NOT_READY,ST_LOCKED,1U};
-        run_ldr_samples(interrupted,8);
-        assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN);
-        assert(!uxQueueMessagesWaiting(xInputQueue));
-        assert(stats.adc_errors==failure);
-    }
-
-    reset();
-    const LdrSample all_high[]={LDR(60),LDR(60),LDR(60),LDR(301),LDR(4095),LDR(4095)};
-    run_ldr_samples(all_high,6);
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_OPEN);
-    assert(xQueueReceive(xInputQueue,&e,0) && e.type==EV_LID_CLOSED && e.tick_ms==250);
-    assert(!uxQueueMessagesWaiting(xInputQueue));
-    assert(stats.ldr_valid && stats.ldr_raw==2830 && stats.adc_errors==0);
 #endif
-    puts("PASS production full-range LDR smoothing, debounce, failures and session resets");
+}
+static void ldr_filter_service(void) {
+    /* Boundary crossings take effect on the first reading, without averaging. */
+    reset();
+    const LdrSample boundary[]={LDR(200),LDR(80),LDR(81),LDR(0),LDR(200)};
+    run_ldr_samples(boundary,5);
+    expect_lid_event(EV_LID_OPEN,50);
+    expect_lid_event(EV_LID_CLOSED,100);
+    expect_lid_event(EV_LID_OPEN,150);
+    expect_lid_event(EV_LID_CLOSED,200);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    assert(stats.ldr_valid && stats.ldr_raw==200 && stats.adc_errors==0);
+
+    reset();
+    const LdrSample repeated[]={LDR(80),LDR(80),LDR(40),LDR(201),LDR(4095)};
+    run_ldr_samples(repeated,5);
+    expect_lid_event(EV_LID_OPEN,0);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    assert(!stats.ldr_valid && stats.ldr_raw==40 && stats.adc_errors==0);
+
+    reset();
+    const LdrSample discarded_closed[]={LDR(200),LDR(201),LDR(4095)};
+    run_ldr_samples(discarded_closed,3);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    assert(!stats.ldr_valid && stats.ldr_raw==200 && stats.adc_errors==0);
+
+    reset();
+    const LdrSample invalid_only[]={LDR(201),LDR(4095)};
+    run_ldr_samples(invalid_only,2);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    assert(!stats.ldr_valid && stats.ldr_raw==0 && stats.adc_errors==0);
+
+    reset();
+    const LdrSample failure[]={LDR(40),{0,BSP_NOT_READY,ST_ALARM,1U},LDR(201),LDR(81)};
+    run_ldr_samples(failure,4);
+    expect_lid_event(EV_LID_OPEN,0);
+    expect_lid_event(EV_LID_CLOSED,150);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    assert(stats.ldr_valid && stats.ldr_raw==81 && stats.adc_errors==1);
+
+    reset();
+    const LdrSample disarmed[]={LDR(80),{40,BSP_OK,ST_IDLE,1U},LDR(40)};
+    run_ldr_samples(disarmed,3);
+    expect_lid_event(EV_LID_OPEN,0);
+    expect_lid_event(EV_LID_OPEN,100);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    assert(stats.ldr_valid && stats.ldr_raw==40);
+
+    reset();
+    const LdrSample new_round[]={LDR(40),{40,BSP_OK,ST_LOCKED,2U},
+        {81,BSP_OK,ST_LOCKED,2U}};
+    run_ldr_samples(new_round,3);
+    expect_lid_event(EV_LID_OPEN,0);
+    expect_lid_event(EV_LID_OPEN,50);
+    expect_lid_event(EV_LID_CLOSED,100);
+    assert(!uxQueueMessagesWaiting(xInputQueue));
+    puts("PASS production direct LDR boundaries, discarded readings, one-shot transitions, failures and rearming");
 }
 int main(void){taps_and_button();overflow_and_failure();beam_service();ldr_filter_service();test_runtime_reset();}

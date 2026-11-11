@@ -3,7 +3,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "vault_sensor_config.h"
 
 /* Pure C processing shared by the RTOS service and host regression tests. */
 typedef struct {
@@ -29,28 +28,14 @@ void vault_encoder_resync(VaultEncoder *encoder, bool clk, bool dt);
 int32_t vault_encoder_update(VaultEncoder *encoder, bool clk, bool dt);
 
 typedef struct {
-    uint16_t samples[VAULT_LDR_AVERAGE_SAMPLES];
-    uint32_t sum;
-    uint32_t count;
-    uint32_t next;
-} VaultLdrAverage;
-
-void vault_ldr_reset(VaultLdrAverage *filter);
-/* Average the full 12-bit ADC range; reject only out-of-range values. */
-bool vault_ldr_update(VaultLdrAverage *filter, uint16_t raw, uint16_t *average);
-
-typedef struct {
     uint16_t threshold;
-    uint16_t hysteresis;
-    uint16_t blocked_samples;
-    uint16_t count;
-    bool blocked_when_low;
+    uint16_t max_valid;
     bool latched;
-    uint16_t clear_samples;
 } VaultBeamFilter;
 
 void vault_beam_reset(VaultBeamFilter *filter);
-/* One true result per confirmed opening; consecutive clear samples release latch. */
+/* Raw <= threshold opens, higher accepted values close; ignore raw > max_valid.
+ * Returns true only on opening. Disarming resets the latch. */
 bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed);
 
 #endif
