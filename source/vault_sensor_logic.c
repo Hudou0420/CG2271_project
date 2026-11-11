@@ -86,7 +86,6 @@ bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed)
         vault_beam_reset(filter);
         return false;
     }
-    if (raw > filter->max_valid) return false;
     bool was_open = filter->latched;
     filter->latched = raw <= filter->threshold;
     return filter->latched && !was_open;

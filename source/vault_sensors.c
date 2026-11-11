@@ -13,8 +13,7 @@ _Static_assert(VAULT_ENCODER_STEPS_PER_ROUND > 0 &&
                "Encoder steps per round must be a positive signed 32-bit value");
 _Static_assert(VAULT_ENCODER_DIRECTION == 1 || VAULT_ENCODER_DIRECTION == -1,
                "Encoder direction must be +1 or -1");
-_Static_assert(VAULT_LDR_THRESHOLD < VAULT_LDR_MAX_VALID &&
-               VAULT_LDR_MAX_VALID <= 4095U, "Invalid lid threshold configuration");
+_Static_assert(VAULT_LDR_THRESHOLD < 4095U, "Invalid lid threshold configuration");
 
 typedef struct {
     BspInput input;
@@ -180,14 +179,14 @@ input_failed:
 void vault_tripwire_task(void *argument)
 {
     (void)argument;
-    VaultBeamFilter filter = {VAULT_LDR_THRESHOLD, VAULT_LDR_MAX_VALID, false};
+    VaultBeamFilter filter = {VAULT_LDR_THRESHOLD, false};
     bool reported_open = false;
     VaultEvent pending = {EV_NONE, 0, 0};
     uint32_t session = 0U;
     TickType_t last_wake = xTaskGetTickCount();
-    PRINTF("Lid sensor: raw ADC every %u ms; discard >%u; "
+    PRINTF("Lid sensor: raw ADC every %u ms; "
            "detection %s (open <=%u, closed >%u).\r\n",
-           VAULT_LDR_SAMPLE_MS, VAULT_LDR_MAX_VALID,
+           VAULT_LDR_SAMPLE_MS,
            VAULT_LDR_BEAM_DETECTION_ENABLED ? "ENABLED" : "DISABLED",
            VAULT_LDR_THRESHOLD, VAULT_LDR_THRESHOLD);
     for (;;) {
@@ -219,8 +218,8 @@ void vault_tripwire_task(void *argument)
                 vTaskDelay(1U);
             } while (true);
         }
-        bool accepted = status == BSP_OK && raw <= VAULT_LDR_MAX_VALID;
-        /* Report every successful ADC reading, even when detection ignores it. */
+        bool accepted = status == BSP_OK;
+        /* Use and report every successful ADC reading. */
         stats.ldr_valid = status == BSP_OK;
         if (status == BSP_OK) stats.ldr_raw = raw;
         if (accepted) {

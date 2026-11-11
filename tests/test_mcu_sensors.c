@@ -161,18 +161,19 @@ static void ldr_filter_service(void) {
     const LdrSample repeated[]={LDR(80),LDR(80),LDR(40),LDR(201),LDR(4095)};
     run_ldr_samples(repeated,5);
     expect_lid_event(EV_LID_OPEN,0);
+    expect_lid_event(EV_LID_CLOSED,150);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
     reset();
-    const LdrSample discarded_closed[]={LDR(200),LDR(201),LDR(4095)};
-    run_ldr_samples(discarded_closed,3);
+    const LdrSample high_closed[]={LDR(200),LDR(201),LDR(4095)};
+    run_ldr_samples(high_closed,3);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
     reset();
-    const LdrSample invalid_only[]={LDR(201),LDR(4095)};
-    run_ldr_samples(invalid_only,2);
+    const LdrSample high_only[]={LDR(201),LDR(4095)};
+    run_ldr_samples(high_only,2);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
@@ -180,7 +181,7 @@ static void ldr_filter_service(void) {
     const LdrSample failure[]={LDR(40),{0,BSP_NOT_READY,ST_ALARM,1U},LDR(201),LDR(81)};
     run_ldr_samples(failure,4);
     expect_lid_event(EV_LID_OPEN,0);
-    expect_lid_event(EV_LID_CLOSED,150);
+    expect_lid_event(EV_LID_CLOSED,100);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==81 && stats.adc_errors==1);
 
@@ -200,6 +201,6 @@ static void ldr_filter_service(void) {
     expect_lid_event(EV_LID_OPEN,50);
     expect_lid_event(EV_LID_CLOSED,100);
     assert(!uxQueueMessagesWaiting(xInputQueue));
-    puts("PASS production direct LDR boundaries, discarded readings, one-shot transitions, failures and rearming");
+    puts("PASS production direct LDR boundaries, full ADC range, one-shot transitions, failures and rearming");
 }
 int main(void){taps_and_button();overflow_and_failure();beam_service();ldr_filter_service();test_runtime_reset();}

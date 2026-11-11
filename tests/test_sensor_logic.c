@@ -89,12 +89,12 @@ static void test_existing_game_contract(void)
 
 static void test_beam_filter(void)
 {
-    VaultBeamFilter filter = {80U, 200U, false};
+    VaultBeamFilter filter = {80U, false};
     assert(!vault_beam_update(&filter, 201U, true) && !filter.latched);
     assert(vault_beam_update(&filter, 80U, true) && filter.latched);
     assert(!vault_beam_update(&filter, 0U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 201U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 4095U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 201U, true) && !filter.latched);
+    assert(!vault_beam_update(&filter, 4095U, true) && !filter.latched);
     assert(!vault_beam_update(&filter, 81U, true) && !filter.latched);
     assert(!vault_beam_update(&filter, 200U, true) && !filter.latched);
     assert(vault_beam_update(&filter, 79U, true) && filter.latched);
@@ -110,6 +110,6 @@ int main(void)
     test_decoder_noise_and_bounds();
     test_existing_game_contract();
     test_beam_filter();
-    puts("PASS: round boundaries/reversal, bounce, invalid states, bounds, sign, existing FSM contract, direct lid thresholds/cutoff.");
+    puts("PASS: round boundaries/reversal, bounce, invalid states, bounds, sign, existing FSM contract, direct lid thresholds/full ADC range.");
     return 0;
 }
