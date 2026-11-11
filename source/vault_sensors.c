@@ -46,7 +46,10 @@ static void count_sent_event(void)
     taskEXIT_CRITICAL();
 }
 
-/* This callback is deliberately independent of the game state. */
+/* INTERRUPT CALLBACK / ISR HANDLER HERE:
+ * GPIO edge events are captured and placed into a private raw queue.
+ * This keeps the ISR short and avoids racing the game logic.
+ */
 static void capture_edge(BspInput input, const BspInputLevels *levels, void *context)
 {
     (void)context;
@@ -84,6 +87,12 @@ void vault_sensors_get_stats(VaultSensorStats *out)
     taskEXIT_CRITICAL();
 }
 
+/* SENSOR POLLING + DEBOUNCE + EVENT GENERATION HERE:
+ * - encoder readback
+ * - tap detection
+ * - button debouncing
+ * - conversion to VaultEvent messages
+ */
 void vault_input_task(void *argument)
 {
     (void)argument;
@@ -178,6 +187,11 @@ input_failed:
     for (;;) vTaskSuspend(NULL);
 }
 
+/* FILTERING / POLLING LOGIC HERE:
+ * - ADC sampling for the light sensor
+ * - threshold and hysteresis checks
+ * - latch filtering before sending beam events
+ */
 void vault_tripwire_task(void *argument)
 {
     (void)argument;

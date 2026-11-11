@@ -81,6 +81,11 @@ void vault_beam_reset(VaultBeamFilter *filter)
     filter->latched = false;
 }
 
+/* FILTERING LOGIC HERE:
+ * - threshold compare
+ * - hysteresis for clear/recover transitions
+ * - locked sample count before reporting a beam event
+ */
 bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed)
 {
     if (!armed) {

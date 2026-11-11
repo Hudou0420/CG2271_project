@@ -40,6 +40,12 @@
 /* ------------------------------------------------------------------ */
 /* Shared objects                                                      */
 /* ------------------------------------------------------------------ */
+/* FREE RTOS / SHARED STATE HERE:
+ * - xInputQueue: sensor + comms events into the FSM
+ * - xUartTxQueue: game packets ready for UART transmission
+ * - xUartRxQueue: raw UART bytes from the ESP32/ISR
+ * - xStateMutex: protects the shared GameState gGame
+ */
 QueueHandle_t     xInputQueue;
 QueueHandle_t     xUartTxQueue;
 QueueHandle_t     xUartRxQueue;
@@ -117,7 +123,8 @@ static void tGame(void *p)
                ev.value < 0 ? "-" : "+", (unsigned int)magnitude, (unsigned int)ev.tick_ms);
 #endif
 
-        /* --- run the FSM while holding the mutex --- */
+        /* --- RUN THE FSM / MUTEX PROTECTION HERE --- */
+        /* FREE RTOS CRITICAL STATE UPDATE: hold the mutex while the game state is changed. */
         TxMsg        tx[4];
         int          ntx = 0;
         VaultActions act;
@@ -243,10 +250,12 @@ int main(void)
 
     vault_init(&gGame);
 
-    xInputQueue  = xQueueCreate(INPUT_Q_LEN, sizeof(VaultEvent));
-    xUartTxQueue = xQueueCreate(TX_Q_LEN,    sizeof(TxMsg));
-    xUartRxQueue = xQueueCreate(RX_Q_LEN,    sizeof(uint8_t));
-    xStateMutex  = xSemaphoreCreateMutex();
+    /* QUEUE HERE: create the RTOS message buses before starting the scheduler. */
+    /* UART / ESP32 QUEUE HERE: xUartRxQueue carries raw bytes from the UART interrupt. */
+    xInputQueue  = xQueueCreate(INPUT_Q_LEN, sizeof(VaultEvent));  // QUEUE HERE
+    xUartTxQueue = xQueueCreate(TX_Q_LEN,    sizeof(TxMsg));       // QUEUE HERE
+    xUartRxQueue = xQueueCreate(RX_Q_LEN,    sizeof(uint8_t));     // QUEUE HERE
+    xStateMutex  = xSemaphoreCreateMutex();                         // MUTEX HERE
 
     if (!xInputQueue || !xUartTxQueue || !xUartRxQueue || !xStateMutex) {
         PRINTF("ERROR: could not create queues/mutex (check heap 4 is selected)\r\n");
@@ -258,6 +267,9 @@ int main(void)
         while (1) { }
     }
 
+    /* SENSOR INITIALIZATION HERE: inputs, ADC, interrupt callbacks, and polling tasks. */
+    /* UART / ESP32 COMMUNICATION HERE: link to the external ESP32 and cloud/internet bridge. */
+    /* INTERNET / FIREBASE BRIDGE HERE: ESP32 handles cloud connectivity; MCU only sends UART packets. */
 #if !VAULT_SELF_TEST
     if (!vault_sensors_init() ||
         xTaskCreate(vault_input_task, "inputs", configMINIMAL_STACK_SIZE + 180,
