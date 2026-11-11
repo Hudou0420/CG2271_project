@@ -20,7 +20,8 @@
 #ifndef VAULT_LDR_BEAM_DETECTION_ENABLED
 #define VAULT_LDR_BEAM_DETECTION_ENABLED 1 /* Lid readings measured on the assembled box. */
 #endif
-#define VAULT_LDR_THRESHOLD           80U /* Open <=80; user-selected threshold. */
+#define VAULT_LDR_THRESHOLD           80U /* Open below this value. */
+#define VAULT_LDR_HIGH_THRESHOLD      250U /* Open above this value; between is closed. */
 
 /* Real hardware and fake-event self-test are mutually exclusive in main. */
 #ifndef VAULT_LOG_INPUT_EVENTS

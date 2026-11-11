@@ -148,32 +148,35 @@ static void expect_lid_event(EventType type, uint32_t tick) {
 static void ldr_filter_service(void) {
     /* Boundary crossings take effect on the first reading, without averaging. */
     reset();
-    const LdrSample boundary[]={LDR(200),LDR(80),LDR(81),LDR(0),LDR(200)};
-    run_ldr_samples(boundary,5);
+    const LdrSample boundary[]={LDR(80),LDR(79),LDR(80),LDR(250),LDR(251),LDR(250)};
+    run_ldr_samples(boundary,6);
     expect_lid_event(EV_LID_OPEN,50);
     expect_lid_event(EV_LID_CLOSED,100);
-    expect_lid_event(EV_LID_OPEN,150);
-    expect_lid_event(EV_LID_CLOSED,200);
+    expect_lid_event(EV_LID_OPEN,200);
+    expect_lid_event(EV_LID_CLOSED,250);
     assert(!uxQueueMessagesWaiting(xInputQueue));
-    assert(stats.ldr_valid && stats.ldr_raw==200 && stats.adc_errors==0);
+    assert(stats.ldr_valid && stats.ldr_raw==250 && stats.adc_errors==0);
 
     reset();
-    const LdrSample repeated[]={LDR(80),LDR(80),LDR(40),LDR(201),LDR(4095)};
+    const LdrSample repeated[]={LDR(40),LDR(40),LDR(40),LDR(201),LDR(4095)};
     run_ldr_samples(repeated,5);
     expect_lid_event(EV_LID_OPEN,0);
     expect_lid_event(EV_LID_CLOSED,150);
+    expect_lid_event(EV_LID_OPEN,200);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
     reset();
-    const LdrSample high_closed[]={LDR(200),LDR(201),LDR(4095)};
-    run_ldr_samples(high_closed,3);
+    const LdrSample high_open[]={LDR(200),LDR(201),LDR(4095)};
+    run_ldr_samples(high_open,3);
+    expect_lid_event(EV_LID_OPEN,100);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
     reset();
     const LdrSample high_only[]={LDR(201),LDR(4095)};
     run_ldr_samples(high_only,2);
+    expect_lid_event(EV_LID_OPEN,50);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
@@ -186,7 +189,7 @@ static void ldr_filter_service(void) {
     assert(stats.ldr_valid && stats.ldr_raw==81 && stats.adc_errors==1);
 
     reset();
-    const LdrSample disarmed[]={LDR(80),{40,BSP_OK,ST_IDLE,1U},LDR(40)};
+    const LdrSample disarmed[]={LDR(40),{40,BSP_OK,ST_IDLE,1U},LDR(40)};
     run_ldr_samples(disarmed,3);
     expect_lid_event(EV_LID_OPEN,0);
     expect_lid_event(EV_LID_OPEN,100);

@@ -29,11 +29,12 @@ int32_t vault_encoder_update(VaultEncoder *encoder, bool clk, bool dt);
 
 typedef struct {
     uint16_t threshold;
+    uint16_t high_threshold;
     bool latched;
 } VaultBeamFilter;
 
 void vault_beam_reset(VaultBeamFilter *filter);
-/* Raw <= threshold opens; all higher readings close.
+/* Raw < threshold or > high_threshold opens; the inclusive interval closes.
  * Returns true only on opening. Disarming resets the latch. */
 bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed);
 

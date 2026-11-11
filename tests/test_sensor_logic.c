@@ -89,17 +89,18 @@ static void test_existing_game_contract(void)
 
 static void test_beam_filter(void)
 {
-    VaultBeamFilter filter = {80U, false};
-    assert(!vault_beam_update(&filter, 201U, true) && !filter.latched);
-    assert(vault_beam_update(&filter, 80U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 0U, true) && filter.latched);
-    assert(!vault_beam_update(&filter, 201U, true) && !filter.latched);
-    assert(!vault_beam_update(&filter, 4095U, true) && !filter.latched);
-    assert(!vault_beam_update(&filter, 81U, true) && !filter.latched);
-    assert(!vault_beam_update(&filter, 200U, true) && !filter.latched);
+    VaultBeamFilter filter = {80U, 250U, false};
+    assert(!vault_beam_update(&filter, 80U, true) && !filter.latched);
     assert(vault_beam_update(&filter, 79U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 0U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 80U, true) && !filter.latched);
+    assert(!vault_beam_update(&filter, 250U, true) && !filter.latched);
+    assert(vault_beam_update(&filter, 251U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 4095U, true) && filter.latched);
+    assert(!vault_beam_update(&filter, 130U, true) && !filter.latched);
+    assert(vault_beam_update(&filter, 30U, true) && filter.latched);
     assert(!vault_beam_update(&filter, 0U, false) && !filter.latched);
-    assert(vault_beam_update(&filter, 0U, true) && filter.latched);
+    assert(vault_beam_update(&filter, 4095U, true) && filter.latched);
     vault_beam_reset(&filter);
     assert(!filter.latched);
 }
