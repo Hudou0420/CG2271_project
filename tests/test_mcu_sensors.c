@@ -162,19 +162,19 @@ static void ldr_filter_service(void) {
     run_ldr_samples(repeated,5);
     expect_lid_event(EV_LID_OPEN,0);
     assert(!uxQueueMessagesWaiting(xInputQueue));
-    assert(!stats.ldr_valid && stats.ldr_raw==40 && stats.adc_errors==0);
+    assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
     reset();
     const LdrSample discarded_closed[]={LDR(200),LDR(201),LDR(4095)};
     run_ldr_samples(discarded_closed,3);
     assert(!uxQueueMessagesWaiting(xInputQueue));
-    assert(!stats.ldr_valid && stats.ldr_raw==200 && stats.adc_errors==0);
+    assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
     reset();
     const LdrSample invalid_only[]={LDR(201),LDR(4095)};
     run_ldr_samples(invalid_only,2);
     assert(!uxQueueMessagesWaiting(xInputQueue));
-    assert(!stats.ldr_valid && stats.ldr_raw==0 && stats.adc_errors==0);
+    assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
     reset();
     const LdrSample failure[]={LDR(40),{0,BSP_NOT_READY,ST_ALARM,1U},LDR(201),LDR(81)};

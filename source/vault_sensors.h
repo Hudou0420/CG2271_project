@@ -13,8 +13,8 @@ typedef struct {
     uint32_t game_events_sent;
     uint32_t beam_queue_retries;
     uint32_t adc_errors;
-    uint16_t ldr_raw; /* Last accepted raw ADC reading. */
-    bool ldr_valid; /* Latest conversion succeeded and was <= VAULT_LDR_MAX_VALID. */
+    uint16_t ldr_raw; /* Last successful raw ADC reading, including values ignored by detection. */
+    bool ldr_valid; /* Latest ADC conversion succeeded; independent of detection cutoff. */
     bool inputs_ready;
     bool beam_detection_enabled;
 } VaultSensorStats;

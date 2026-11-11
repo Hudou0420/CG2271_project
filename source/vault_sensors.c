@@ -220,9 +220,10 @@ void vault_tripwire_task(void *argument)
             } while (true);
         }
         bool accepted = status == BSP_OK && raw <= VAULT_LDR_MAX_VALID;
-        stats.ldr_valid = accepted;
+        /* Report every successful ADC reading, even when detection ignores it. */
+        stats.ldr_valid = status == BSP_OK;
+        if (status == BSP_OK) stats.ldr_raw = raw;
         if (accepted) {
-            stats.ldr_raw = raw;
             if (VAULT_LDR_BEAM_DETECTION_ENABLED) {
                 (void)vault_beam_update(&filter, raw, armed);
             }
