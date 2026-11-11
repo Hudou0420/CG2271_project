@@ -2,10 +2,10 @@
 #define VAULT_ACTUATOR_CONFIG_H
 
 #ifndef VAULT_LED_ENABLED
-#define VAULT_LED_ENABLED 1
+#define VAULT_LED_ENABLED 0 /* Temporary LDR interference isolation. */
 #endif
 #ifndef VAULT_BUZZER_ENABLED
-#define VAULT_BUZZER_ENABLED 1
+#define VAULT_BUZZER_ENABLED 0 /* Re-enable outputs individually after testing. */
 #endif
 #define VAULT_LED_BRIGHTNESS       64U
 #define VAULT_LED_DIAL_BLUE        16U
