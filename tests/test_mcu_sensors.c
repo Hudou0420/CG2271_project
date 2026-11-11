@@ -148,12 +148,12 @@ static void expect_lid_event(EventType type, uint32_t tick) {
 static void ldr_filter_service(void) {
     /* Boundary crossings take effect on the first reading, without averaging. */
     reset();
-    const LdrSample boundary[]={LDR(80),LDR(79),LDR(80),LDR(250),LDR(251),LDR(250)};
-    run_ldr_samples(boundary,6);
+    const LdrSample boundary[]={LDR(80),LDR(79),LDR(80),LDR(250),LDR(251),LDR(350),LDR(351),LDR(250)};
+    run_ldr_samples(boundary,8);
     expect_lid_event(EV_LID_OPEN,50);
     expect_lid_event(EV_LID_CLOSED,100);
     expect_lid_event(EV_LID_OPEN,200);
-    expect_lid_event(EV_LID_CLOSED,250);
+    expect_lid_event(EV_LID_CLOSED,300);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==250 && stats.adc_errors==0);
 
@@ -162,21 +162,18 @@ static void ldr_filter_service(void) {
     run_ldr_samples(repeated,5);
     expect_lid_event(EV_LID_OPEN,0);
     expect_lid_event(EV_LID_CLOSED,150);
-    expect_lid_event(EV_LID_OPEN,200);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
     reset();
-    const LdrSample high_open[]={LDR(200),LDR(201),LDR(4095)};
-    run_ldr_samples(high_open,3);
-    expect_lid_event(EV_LID_OPEN,100);
+    const LdrSample high_closed[]={LDR(200),LDR(201),LDR(4095)};
+    run_ldr_samples(high_closed,3);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
     reset();
     const LdrSample high_only[]={LDR(201),LDR(4095)};
     run_ldr_samples(high_only,2);
-    expect_lid_event(EV_LID_OPEN,50);
     assert(!uxQueueMessagesWaiting(xInputQueue));
     assert(stats.ldr_valid && stats.ldr_raw==4095 && stats.adc_errors==0);
 
