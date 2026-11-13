@@ -1,10 +1,6 @@
 #ifndef VAULT_SENSOR_CONFIG_H
 #define VAULT_SENSOR_CONFIG_H
 
-/* CONFIGURATION HERE:
- * tune sensor thresholds, polling intervals, debouncing, and queue sizing
- * before testing on the physical hardware.
- */
 /* Application/service configuration only. Existing BSP and VaultEvent APIs
  * are unchanged. Values marked provisional require physical measurements.
  */

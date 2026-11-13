@@ -9,17 +9,16 @@ extern "C" {
 
 typedef struct {
     bool rgb_active_low;       /* true for the tested common-positive RGB */
-    bool relay_active_low;     /* Set after testing; affects logical set(). */
     bool laser_active_low;
     bool enable_laser_signal;  /* Optional PTD7 logic control; default false. */
 } BspOutputConfig;
 
-/* Defaults: RGB active-low, relay/laser active-high, laser signal disabled. */
+/* Defaults: RGB active-low, laser active-high, laser signal disabled. */
 void bsp_outputs_default_config(BspOutputConfig *config);
 
 /* Startup only; call after BOARD_InitBootClocks(). NULL uses defaults.
  * Owns TPM0 and TPM1 exclusively. Selects shared TPM source IRC48M without
- * changing UART clocks. Initializes RGB off, buzzer silent, relay inactive.
+ * changing UART clocks. Initializes RGB off, buzzer silent.
  * Disabled laser signal leaves PTD7 as an input with no pulls.
  */
 BspStatus bsp_outputs_init(const BspOutputConfig *config);
@@ -41,11 +40,7 @@ BspStatus bsp_buzzer_set_frequency(uint32_t frequency_hz);
  */
 BspStatus bsp_buzzer_set_pwm(uint32_t frequency_hz, uint16_t duty_permille);
 
-/* Raw electrical level and polarity-aware logical control are both exposed.
- * true in set() means requested ON, not a physical contact-state readback.
- */
-BspStatus bsp_relay_write_level(bool high);
-BspStatus bsp_relay_set(bool on);
+/* Raw electrical level and polarity-aware logical control are both exposed. */
 BspStatus bsp_laser_write_level(bool high);
 BspStatus bsp_laser_set(bool on);
 

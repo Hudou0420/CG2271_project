@@ -3,7 +3,7 @@
 uint8_t test_rgb_red, test_rgb_green, test_rgb_blue;
 uint32_t test_buzzer_hz;
 void bsp_outputs_default_config(BspOutputConfig *config)
-{ *config = (BspOutputConfig){true, false, false, false}; }
+{ *config = (BspOutputConfig){true, false, false}; }
 BspStatus bsp_laser_set(bool on)
 { (void)on; return BSP_OK; }
 BspStatus bsp_rgb_set(uint8_t red, uint8_t green, uint8_t blue)

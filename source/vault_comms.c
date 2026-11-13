@@ -117,12 +117,7 @@ _Static_assert(DIGIT_ABSENT == VP_DIGIT_ABSENT && DIGIT_PRESENT == VP_DIGIT_PRES
 
 /* ---- ISR ------------------------------------------------------------------ */
 
-/* INTERRUPT / UART RX HANDLER HERE:
- * - ISR reads incoming byte from LPUART
- * - pushes it into xUartRxQueue for the tComms task
- * - keeps parsing and protocol logic out of the ISR
- */
-/* QUEUE HERE: raw UART bytes move from ISR to tComms task. */
+/* RX ISR: pushes each byte into xUartRxQueue for tComms; no parsing here. */
 void COMMS_UART_IRQHandler(void)
 {
     BaseType_t woken = pdFALSE;
@@ -223,8 +218,6 @@ static void retry_pending(void)
 }
 
 /* STATUS payload: game progress from gGame plus a sensor snapshot. */
-/* UART STATUS / SENSOR TELEMETRY HERE: send state and sensor health to the ESP32. */
-/* INTERNET / FIREBASE LINK HERE: ESP32 may forward these packets to external services. */
 static bool build_status(uint8_t *p)
 {
     VaultSensorStats st;
@@ -417,11 +410,7 @@ static void handle_byte(uint8_t byte)
 
 /* ---- Task ----------------------------------------------------------------- */
 
-/* UART / POLLING LOOP HERE:
- * - read bytes from xUartRxQueue
- * - parse protocol frames
- * - ACK/NAK and resend if needed
- */
+/* Reads bytes from xUartRxQueue, parses frames, handles ACK/NAK and resends. */
 void vault_comms_task(void *argument)
 {
     uint8_t byte;

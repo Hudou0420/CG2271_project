@@ -24,10 +24,9 @@ component end is outside this table.
 | External RGB green (observed colour) | J4-12 / A5 | PTC1 | TPM0_CH0 | ALT4, active-low, 1 kHz, initially off |
 | External RGB B | J2-4 / D9 | PTD2 | TPM0_CH2 | ALT4, 1 kHz, initially off |
 | Passive buzzer signal | J1-8 / D3 | PTA12 | TPM1_CH0 | ALT1 low while silent; ALT3 for PWM |
-| Relay control | J2-8 / D11 | PTD6 | GPIO output | ALT1, logically off |
 | Optional laser logic control | J2-10 / D12 | PTD7 | GPIO output when enabled | Default is input, no pull |
-| **Reserved: Person 3 ESP32 link TX** | **J2-18** | **PTE0** | **LPUART1_TX ALT3** | **Configured by source/vault_comms.c, not the BSP** |
-| **Reserved: Person 3 ESP32 link RX** | **J2-20** | **PTE1** | **LPUART1_RX ALT3** | **Configured by source/vault_comms.c, not the BSP** |
+| **Reserved: ESP32 link TX** | **J2-18** | **PTE0** | **LPUART1_TX ALT3** | **Configured by source/vault_comms.c, not the BSP** |
+| **Reserved: ESP32 link RX** | **J2-20** | **PTE1** | **LPUART1_RX ALT3** | **Configured by source/vault_comms.c, not the BSP** |
 
 Board power contacts: J3-8 is 3V3_OUT, J3-10 is 5V0_OUT, and J3-12/J3-14
 are GND. These identify board rails only, not which rail each module needs.
@@ -45,17 +44,15 @@ FRDM-MCXC444                       Module-side signal
   J4-10  PTC2 -------------------- RGB red (observed colour)
   J2-4   PTD2 -------------------- RGB B
   J1-8   PTA12 ------------------- Buzzer control
-  J2-8   PTD6 -------------------- Relay control
   J2-10  PTD7 - - - - - - - - - - Optional laser logic control
   GND --------------------------- Common signal ground
 
-  J2-18  PTE0  ================== Person 3: LPUART1 TX -> ESP32 GPIO5
-  J2-20  PTE1  ================== Person 3: LPUART1 RX <- ESP32 GPIO4
+  J2-18  PTE0  ================== ESP32 link: LPUART1 TX -> ESP32 GPIO5
+  J2-20  PTE1  ================== ESP32 link: LPUART1 RX <- ESP32 GPIO4
 ```
 
-PTD7 is a logic output only. If the laser is powered/switched solely through
-relay contacts, leave PTD7 unconnected and use bsp_relay_set(). If the module
-has a verified logic-enable input, enable PTD7 in BspOutputConfig. This BSP
+PTD7 is a logic output only. If the module has a verified logic-enable input,
+enable PTD7 in BspOutputConfig. This BSP
 does not establish which physical module pin is power or signal.
 
 ## Resource ownership
@@ -88,12 +85,12 @@ Do not run generated pin/peripheral initialization again after bsp_init().
 | bsp_types.h | Shared return codes |
 | bsp_inputs.h / .c | Raw digital reads, configurable pulls/edges, ISR callback |
 | bsp_light.h / .c | Raw ADC counts and bounded startup self-calibration |
-| bsp_outputs.h / .c | RGB PWM, buzzer PWM, raw/logical relay and laser writes |
+| bsp_outputs.h / .c | RGB PWM, buzzer PWM, raw/logical laser writes |
 | examples/raw_input_queue.c.example | Optional application-side FreeRTOS adapter |
 
 Debug and Release .cproject source/include paths include bsp/. The example
 has a .example suffix so it is not compiled or run automatically. The current
-application main runs independently selected tests, currently relay and LDR,
+application main runs independently selected tests, currently LDR,
 with tap/encoder handling retained. If MCUXpresso was
 already open, refresh/reload the project so it sees the updated build settings.
 
@@ -103,54 +100,6 @@ Cortex-M0+ compilation with -Wall -Wextra -Werror -Wconversion at -O2. The
 FreeRTOS adapter example passed a syntax check against this project's kernel
 headers. These checks do not execute the drivers on hardware. The application
 is a component test; its image size is not the size of a fully integrated vault.
-
-## Current main: relay test
-
-A relay is an electrically operated switch. The module's signal input
-controls its coil/driver, and the contacts switch a separate circuit.
-For the vault, those contacts can switch laser power independently of the
-MCU's GPIO current capability.
-
-`RELAY_TEST_ENABLED=1` currently enables a repeated logical OFF/ON cycle.
-`RELAY_TEST_ACTIVE_LOW=0` assumes HIGH energizes the module; change it to 1
-if testing shows that LOW energizes it. The GPIO signal is on
-**PTD6 / J2 pin 8**. Ground connects to **J3 pin 12 or 14 / GND**.
-Power the module's verified VCC pin at its specified module supply voltage.
-J3-8 provides 3.3 V and J3-10 provides 5 V; a module that needs 5 V coil power
-must still have an input circuit suitable for the MCU's 3.3 V logic. Do not
-connect a bare relay coil directly to the GPIO.
-
-First test with **nothing attached to the relay contact terminals**:
-
-1. Power off the board, connect the module's signal, ground and verified
-   supply pins, then power it on and flash the Debug image.
-2. At 115200 baud, 8N1, watch the relay messages alternate approximately
-   every 2 seconds. Listen for a click at each state change. An indicator
-   LED alone does not establish that the coil or contacts have switched.
-3. For a module labelled COM/NO/NC, use a continuity meter on its unloaded
-   contacts: with the coil de-energized COM-NC is closed and COM-NO is open;
-   energizing the coil reverses these connections. Determine terminal
-   positions from their actual labels, not a guessed left-to-right order.
-4. Confirm that logical ON corresponds to the coil being energized; update
-   `RELAY_TEST_ACTIVE_LOW` if necessary. Test a low-voltage load only after
-   the unloaded contact test succeeds.
-
-```text
-RELAY requested=OFF, signal=LOW, active_low=0
-RELAY requested=ON, signal=HIGH, active_low=0
-```
-
-The messages report commands, not physical contact feedback. No load or
-laser supply is switched by this test unless you wire it to the contacts.
-`bsp_relay_set(bool on)` is the polarity-aware API; it returns `BspStatus`.
-`bsp_relay_write_level(bool high)` instead requests a raw electrical level.
-
-Existing settings are preserved: laser test 0, LDR test 1, buzzer/RGB tests 0,
-sensor prints 0. Set `LDR_TEST_ENABLED=0` if you want a relay-only console.
-Set `RELAY_TEST_ENABLED=0` to disable relay cycling on the next build/reset;
-it is initialized logically inactive if another output test initializes the
-output driver. Hold periods use 2000 main-loop samples, so actual time
-includes loop and console overhead.
 
 ## Independent laser control and LDR tests
 
@@ -184,7 +133,7 @@ Both switches can also be overridden with compiler `-D` definitions.
 
 The laser GPIO is a **logic control**, not a laser power source. Establish
 the laser module's power/control pin functions separately; if its `S` pin
-is the power input, switch that supply through suitable relay/driver hardware
+is the power input, switch that supply through suitable driver hardware
 instead of powering it from PTD7. The laser's supply voltage must match the
 actual module. LDR analog input must remain within VREFL..VREFH, normally
 0..3.3 V; do not feed a 5 V analog output into PTB0.
@@ -224,7 +173,6 @@ Current switches in `source/cg2271_project_mcu.c`:
 
 | Switch | Value | Effect |
 | --- | --- | --- |
-| `RELAY_TEST_ENABLED` | `1` | Toggle relay control independently |
 | `LASER_TEST_ENABLED` | `0` | Laser control test retained, currently disabled |
 | `LDR_TEST_ENABLED` | `1` | Initialize ADC and report raw LDR readings independently |
 | `BUZZER_TEST_ENABLED` | `0` | Buzzer test retained, currently silent |
@@ -261,7 +209,7 @@ BUZZER 1000 Hz, 50% duty (~500 ms)
 TPM1 generates tones in hardware while the main loop continues sampling the
 button and servicing tap/encoder interrupts. No FreeRTOS scheduler is started.
 Output initialization also establishes the tested common-positive RGB's OFF
-state and relay inactive; the laser is controlled by its separate test switch. RGB cycling does
+state; the laser is controlled by its separate test switch. RGB cycling does
 not run. Restore `RGB_TEST_ENABLED=1` to enable its saved test. Set
 `BUZZER_TEST_ENABLED=0` to disable the buzzer test on the next build/reset.
 
@@ -435,7 +383,6 @@ be called after their corresponding initialization succeeds.
  * BOARD_InitBootPeripherals() and optional debug-console initialization: */
 BspOutputConfig outputs;
 bsp_outputs_default_config(&outputs);
-/* outputs.relay_active_low = true;   // Only if verified for your module. */
 /* outputs.enable_laser_signal = true; // Only for a logic-control input. */
 BspStatus status = bsp_init(&outputs);
 if (status != BSP_OK) {
@@ -443,11 +390,8 @@ if (status != BSP_OK) {
 }
 ```
 
-Defaults: tested external RGB active-low (common positive), relay active-high, optional
-laser signal disabled. Output init requests RGB off, buzzer silent and relay
-off according to the configured polarity. It cannot guarantee a relay's
-physical startup state before firmware runs, or if polarity is configured
-incorrectly. Logical relay commands do not report contact feedback.
+Defaults: tested external RGB active-low (common positive), optional
+laser signal disabled. Output init requests RGB off and buzzer silent.
 
 bsp_init() initializes outputs, inputs, then ADC. If ADC self-calibration
 fails, the output/input drivers remain usable and ADC calls return
@@ -615,9 +559,6 @@ bsp_rgb_set(0, 128, 255);
 bsp_buzzer_set_frequency(1000);    /* Hardware PWM, 50% duty. Returns now. */
 bsp_buzzer_set_pwm(2000, 250);      /* 25% duty, optional raw control. */
 bsp_buzzer_set_frequency(0);       /* Silent, pad driven low. */
-bsp_relay_write_level(true);       /* Electrical HIGH regardless of polarity. */
-bsp_relay_set(true);               /* Logical ON using configured polarity. */
-bsp_relay_set(false);
 bsp_outputs_off();
 ```
 
@@ -645,9 +586,8 @@ requests preserve the running waveform. Frequency changes restart TPM1.
 3. Enable raw interrupts and count captured edges without debounce.
 4. Test external RGB channels separately and 0/255 endpoints.
 5. Run a buzzer tone, change pitch, verify RGB brightness stays unchanged.
-6. Toggle relay electrical levels; establish active polarity, then configure it.
-7. Test optional laser logic output only if that interface is applicable.
-8. Record bounce, direction, beam-on/blocked values and response timing.
+6. Test optional laser logic output only if that interface is applicable.
+7. Record bounce, direction, beam-on/blocked values and response timing.
 
 Build checks do not establish electrical behaviour. Debounce, encoder
 decoding, beam thresholds, arming readiness, output patterns and game events

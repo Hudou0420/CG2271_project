@@ -25,12 +25,6 @@
 #define TX_Q_LEN        5   /* TxMsg items       -> tComms                 */
 #define RX_Q_LEN        64  /* raw UART bytes    -> tComms (Person 3)      */
 
-/* SHARED RTOS OBJECTS / QUEUE / MUTEX HERE:
- * - xInputQueue: event bus for sensor and command inputs
- * - xUartTxQueue: outbound UART frames to the ESP32 link
- * - xUartRxQueue: raw ISR-to-task UART stream
- * - xStateMutex: protects the shared game state
- */
 /* Shared objects (defined in CG2271_Project.c) */
 extern QueueHandle_t     xInputQueue;   /* element: VaultEvent  (many senders, tGame receives) */
 extern QueueHandle_t     xUartTxQueue;  /* element: TxMsg       (tGame sends, tComms receives) */

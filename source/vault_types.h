@@ -111,7 +111,6 @@ typedef struct {
 
 /* ------------------------------------------------------------------ */
 /* Outgoing packet request (tGame -> xUartTxQueue -> tComms)           */
-/* PLACEHOLDER type numbers: agree the real ones with Person 3.        */
 /* ------------------------------------------------------------------ */
 #define PKT_ATTEMPT   0x10  /* payload: g0 g1 g2 attempts closeness feedback[3] */
 #define PKT_SOLVED    0x11  /* payload: attempts time_hi time_lo        */

@@ -1,4 +1,4 @@
-# Sensor services in the merged project
+# Sensor services
 
 ## Lid detection calibration
 
@@ -23,11 +23,8 @@ Repeat, holding open beyond 10 seconds: ALARM must remain until closure.
 These thresholds are specific to the measured box and lighting; remeasure if
 sensor placement, wiring, or ambient light changes.
 
-These services are implemented in the repository-root **CG2271_Project**.
-The older nested `cg2271_project_mcu/` bench project was moved to external
-local backups, as documented in the repository README. Existing BSP
-files and public BSP APIs are unchanged. No test cycling of actuators is
-introduced by this service.
+These services live in the repository-root **CG2271_Project**. The BSP and
+its public APIs are unchanged, and the service does no test cycling of actuators.
 
 ## Configuration
 
@@ -65,7 +62,7 @@ states 00 and 11. The startup position is zero. The service computes:
 round_index = net_accepted_steps / VAULT_ENCODER_STEPS_PER_ROUND
 ```
 
-Division truncates toward zero. For an example setting of 40 (the default is 4):
+Division truncates toward zero. For an example setting of 40 (the default is 15):
 
 | Net steps | Round index | New event at this boundary |
 | --- | --- | --- |
@@ -112,7 +109,7 @@ All processed sensor events use the **existing `xInputQueue`** and unchanged
 The existing EV_DIAL payload remains a delta. Only its physical unit changes
 from one encoder step to one calibrated round-index change. The existing
 FSM therefore advances/reverses `current_digit` once per round event and
-still wraps 0..9. Threshold/other gameplay changes remain Person 1's FSM
+still wraps 0..9. Threshold/other gameplay changes remain the FSM's
 responsibility. Sensor processing never writes `gGame`.
 
 ```text
@@ -171,7 +168,7 @@ issue. Example:
 The game remains IDLE until an ARM command arrives from the ESP32. Events
 still reach tGame and can be logged, but the FSM ignores dial/knock input
 outside the applicable states. See [actuator feedback](../docs/actuators.md)
-and the root README for the merged output and UART services.
+and the root README for the output and UART services.
 
 ## Diagnostics and regression tests
 
@@ -187,6 +184,6 @@ handling, and beam hysteresis/latching. Compile it with a host C compiler
 alongside `source/vault_sensor_logic.c` and `source/vault_fsm.c`, using
 `-Isource`; do not add its main to the MCU project's source folders.
 
-The saved standalone bench example and external backups are preserved.
+The standalone bench example is kept in `examples/`.
 Physical calibration, captured-edge loss under load and actual hardware
 timing still need board tests.

@@ -13,7 +13,7 @@ The existing BSP wiring and PWM drivers are used:
 | RGB blue | PTD2 | J2-4 / D9 |
 | Passive buzzer signal | PTA12 | J1-8 / D3 |
 
-The documented RGB LED is common-positive, with active-low PWM. The red and green mapping follows the observed colours recorded in the BSP. Check [the BSP wiring notes](../bsp/README.md) for the existing circuit and module power connections. The laser control signal is active-high on PTD7 / J2-10. It is on only while the lid is detected open during ALARM. Relay operation is unchanged.
+The documented RGB LED is common-positive, with active-low PWM. The red and green mapping follows the observed colours recorded in the BSP. Check [the BSP wiring notes](../bsp/README.md) for the existing circuit and module power connections. The laser control signal is active-high on PTD7 / J2-10. It is on only while the lid is detected open during ALARM.
 
 ## What to expect
 
@@ -41,7 +41,7 @@ Edit [source/vault_actuator_config.h](../source/vault_actuator_config.h) to adju
 
 The actuator task updates every 20 ms using hardware PWM between updates. Only this task writes the RGB LED and buzzer during gameplay. `tGame` publishes the latest state and accepted feedback through a one-element state mailbox and a 16-element cue queue after releasing the state mutex. Queue writes never wait for space. State epochs cancel obsolete feedback, including rearming while already locked.
 
-A failed output write logs one diagnostic and attempts to switch that output off. Further writes to that output stop until reboot; the other output continues. A hardware failure can prevent the off request from succeeding. The service never uses the BSP's all-output shutdown routine, which would also alter relay and laser.
+A failed output write logs one diagnostic and attempts to switch that output off. Further writes to that output stop until reboot; the other output continues. A hardware failure can prevent the off request from succeeding. The service never uses the BSP's all-output shutdown routine, which would also alter the laser.
 
 ## Verify on the board
 

@@ -56,9 +56,6 @@
 #define BSP_BUZZER_MIN_HZ        40U
 #define BSP_BUZZER_MAX_HZ        20000U
 
-#define BSP_RELAY_PORT           PORTD
-#define BSP_RELAY_GPIO           GPIOD
-#define BSP_RELAY_PIN            6U  /* J2-8 */
 #define BSP_LASER_PORT           PORTD
 #define BSP_LASER_GPIO           GPIOD
 #define BSP_LASER_PIN            7U  /* J2-10 / D12, optional logic control only */

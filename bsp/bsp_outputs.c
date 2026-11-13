@@ -51,7 +51,6 @@ void bsp_outputs_default_config(BspOutputConfig *config)
 {
     if (config != NULL) {
         config->rgb_active_low = true; /* Observed common-positive LED. */
-        config->relay_active_low = false;
         config->laser_active_low = false;
         config->enable_laser_signal = false;
     }
@@ -73,7 +72,6 @@ BspStatus bsp_outputs_init(const BspOutputConfig *config)
     SIM->SCGC5 |= SIM_SCGC5_PORTA_MASK | SIM_SCGC5_PORTC_MASK | SIM_SCGC5_PORTD_MASK;
     SIM->SCGC6 |= SIM_SCGC6_TPM0_MASK | SIM_SCGC6_TPM1_MASK;
 
-    gpio_output(BSP_RELAY_PORT, BSP_RELAY_GPIO, BSP_RELAY_PIN, output_config.relay_active_low);
     if (output_config.enable_laser_signal) {
         gpio_output(BSP_LASER_PORT, BSP_LASER_GPIO, BSP_LASER_PIN, output_config.laser_active_low);
     } else {
@@ -166,18 +164,6 @@ BspStatus bsp_buzzer_set_frequency(uint32_t frequency_hz)
     return bsp_buzzer_set_pwm(frequency_hz, 500U);
 }
 
-BspStatus bsp_relay_write_level(bool high)
-{
-    if (!initialized) return BSP_NOT_READY;
-    gpio_write(BSP_RELAY_GPIO, BSP_RELAY_PIN, high);
-    return BSP_OK;
-}
-
-BspStatus bsp_relay_set(bool on)
-{
-    return bsp_relay_write_level(on != output_config.relay_active_low);
-}
-
 BspStatus bsp_laser_write_level(bool high)
 {
     if (!initialized || !output_config.enable_laser_signal) return BSP_NOT_READY;
@@ -195,6 +181,5 @@ void bsp_outputs_off(void)
     if (!initialized) return;
     (void)bsp_rgb_set(0U, 0U, 0U);
     (void)bsp_buzzer_set_frequency(0U);
-    (void)bsp_relay_set(false);
     (void)bsp_laser_set(false);
 }

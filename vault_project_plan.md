@@ -2,6 +2,8 @@
 
 > An AI-refereed safe-cracking game. A player must knock a secret rhythm, dial the right combination and avoid tripping the vault's defences, while an LLM game master watches every attempt and taunts or hints accordingly.
 
+This document describes the system as built. Detailed behaviour lives in the guides it links to.
+
 ---
 
 ## 1. Problem Statement
@@ -20,35 +22,35 @@ All core parts come from the provided kit and boards.
 |---|---|---|---|---|---|
 | S1 | Tap Module | MCXC444 | Digital GPIO | **Interrupt** | Detects the secret knock that wakes the vault |
 | S2 | Rotary Encoder (CLK, DT, SW) | MCXC444 | Digital GPIO | **Interrupt** | The safe dial; the push button (SW) confirms each digit |
-| S3 | Photo Resistor | MCXC444 | ADC | **Polled** | Receives the laser beam; a drop in light means the lid is open or someone has reached in |
-| S4 | GY-521 MPU-6050 | ESP32 | I2C | **Polled** | Detects the box being shaken or lifted |
+| S3 | Photo Resistor | MCXC444 | ADC | **Polled** | Detects the lid being opened: ambient light inside the box drops when the lid lifts |
+| S4 | GY-521 (MPU-6500 chip) | ESP32 | I2C | **Polled** | Detects the box being shaken or lifted |
 
 ### 2.2 Actuators (3)
 
 | # | Part (kit label) | Board | Interface | Purpose |
 |---|---|---|---|---|
-| A1 | Relay | MCXC444 | Digital GPIO | Acts as the lock: it switches power to the laser tripwire, so the tripwire is on when armed and off when cracked (or drives a latch in the upgrade) |
-| A2 | Passive Buzzer | MCXC444 | PWM (timer) | Beeps, victory tune, alarm siren |
-| A3 | RGB LED | MCXC444 | PWM (3 channels) | Status: red when locked, a warm/cold gradient for hints, green when open, flashing when in alarm |
+| A1 | Laser Emit module | MCXC444 | Digital GPIO (PTD7, logic control) | Switched on while the lid is open during an alarm |
+| A2 | Passive Buzzer | MCXC444 | PWM (timer) | Beeps, dial ticks, victory tune, alarm siren |
+| A3 | RGB LED | MCXC444 | PWM (3 channels) | Status: red when locked, a warm/cold gradient for hints, green when open, flashing red in alarm |
+
+The laser's GPIO is a logic control, not a power source. See [the BSP notes](bsp/README.md) before wiring it.
 
 ### 2.3 Supporting parts
 
 | Part | Source | Purpose |
 |---|---|---|
-| Laser Emit module | Kit | Beam source for the tripwire (powered through the relay) |
-| MB102 breadboard power module | Kit | Backup 5 V / 3.3 V supply if the relay or laser loads the boards too much |
 | 2 × mini breadboards, jumper wires | Provided | Wiring |
 | FRDM-MCXC444, ESP32 + USB cable | Provided | Controllers |
 | Box with lift-off lid (shoebox / plastic container) | Own | Enclosure |
 | Small prize (e.g. sweets) | Own | Something to win |
 | Tape / Blu-Tack, phone hotspot, laptop or phone | Own | Mounting, internet, web page display |
 
-### 2.4 Things to verify early
+### 2.4 Calibration notes
 
-- [ ] **Relay drive voltage**: kit relays are often 5 V modules. Confirm a 3.3 V GPIO from the MCXC444 can trigger it; if not, power the relay module from 5 V (or the MB102) and check whether the input pin still triggers reliably.
-- [ ] **Photoresistor contrast**: measure ADC readings with the beam on vs. blocked under lab lighting, and pick a threshold with a wide margin.
-- [ ] **Encoder bounce**: check whether the CLK edges are noisy and whether software debouncing (ignoring edges within a few ms) is needed.
-- [ ] **Tap module sensitivity**: confirm it fires reliably through the lid material, and adjust the knock strength or mounting accordingly.
+- **Photoresistor**: on the assembled box the reading is about 225–238 with the lid closed and 94–102 with it open. Three consecutive readings at or below 80 confirm an opening; a reading at or above 180 confirms closure. Remeasure if the sensor placement, wiring or ambient light changes.
+- **Encoder**: `VAULT_ENCODER_STEPS_PER_ROUND` sets how many accepted half-cycle steps make one digit change. Edges are debounced in the sequence decoder.
+- **Tap module**: debounced at 40 ms; the active edge is configurable in `source/vault_sensor_config.h`.
+- **Tamper (MPU)**: thresholds are in [the hint guide](docs/game-master-hints.md) and need a physical check on the assembled box.
 
 ---
 
@@ -59,13 +61,11 @@ All core parts come from the provided kit and boards.
    Tap sensor →  │   [TAP]  (taped on top of lid)     │
                  └────────────────────────────────────┘
                  ┌────────────────────────────────────┐
-                 │ LASER ───────────────────► PHOTO-R │  ← tripwire, just under lid
-                 │                                    │
-                 │   [Relay] [Buzzer]     [ Prize ]   │
+                 │ [LDR]  [Laser]       [Buzzer]      │
                  │                                    │
                  │  [MCXC444]  [breadboards] [ESP32]  │
-                 │            [MPU-6050 flat on floor]│
-  FRONT FACE →   │   (DIAL)   (RGB LED)               │ → USB/power cable out the back
+                 │            [IMU flat on floor]     │
+  FRONT FACE →   │   (DIAL)   (RGB LED)   [ Prize ]   │ → USB/power cable out the back
                  └────────────────────────────────────┘
 ```
 
@@ -76,9 +76,9 @@ All core parts come from the provided kit and boards.
 - **Beside the box**: a laptop or phone showing the web dashboard (AI messages, attempt history, leaderboard).
 
 **Inside**
-- **Laser and photoresistor**: on opposite walls just below the lid line, aligned so the beam hits the sensor. Shield the photoresistor with a small paper tube to reduce ambient light.
-- **MPU-6050**: fixed flat to the floor, so it moves with the box.
-- **Boards and breadboards**: taped down, with wires kept below the beam path.
+- **Photoresistor**: positioned so that it sees much more light with the lid closed than with it open, as measured in §2.4.
+- **IMU**: fixed flat to the floor, so it moves with the box.
+- **Boards and breadboards**: taped down, with wires kept clear.
 - **Prize**: in a corner, clear of the wiring.
 
 ---
@@ -92,38 +92,41 @@ All core parts come from the provided kit and boards.
  IDLE ─────────────────► LOCKED ─────────────────► DIALING
   ▲                        ▲  ▲                      │  │
   │                        │  │ wrong code           │  │ correct code
-  │ re-arm (web)           │  └──────────────────────┘  ▼
+  │ DISARM (web)           │  └──────────────────────┘  ▼
   │                        │                         UNLOCKED ── re-arm ──► LOCKED
   │              lockout   │
   │              expires   │
   │                        │
-  └─────────────── ALARM ◄─┴── beam broken / tamper (from LOCKED or DIALING)
+  └─────────────── ALARM ◄─┴── lid open / tamper (from LOCKED or DIALING)
 ```
 
-| State | LED | Buzzer | Relay / Laser | Accepts |
+| State | LED | Buzzer | Laser | Accepts |
 |---|---|---|---|---|
-| IDLE | Off / dim white | Silent | Laser off | ARM from web |
-| LOCKED | Solid red | Silent | Laser **on** | Knocks |
-| DIALING | Warm/cold hint colour | Tick per dial step | Laser **on** | Dial turns, button presses |
-| UNLOCKED | Green | Victory tune | Laser **off** | Re-arm from web |
-| ALARM | Flashing red | Siren | Laser on | Nothing (30 s lockout) |
+| IDLE | Off | Silent | Off | ARM from web |
+| LOCKED | Solid red; the hint colour for 5 s after a wrong guess | Silent | Off | Knocks |
+| DIALING | Dim blue | Tick per dial step | Off | Dial turns, button presses |
+| UNLOCKED | Green | Victory tune (once) | Off | Re-arm from web |
+| ALARM (tamper) | Flashing red | Siren, repeating 1 s on / 2 s off | On only if the lid is also open | Nothing; 10 s lockout (held longer while the lid is open) |
+| ALARM (lid open) | Flashing red | Silent | **On** while the lid is open | Nothing; no timed lockout, ends when the lid closes |
+
+DISARM is ignored during ALARM. The exact colours and sounds are in [the actuator guide](docs/actuators.md).
 
 ### 4.2 A round
 
 1. **Arm**: the owner enters a 3-digit combination (each digit 0–9) on the web page. The ESP32 sends it to the MCXC444, which moves to LOCKED.
-2. **Wake**: the player knocks the secret rhythm (e.g. knock–knock–pause–knock). On a match the vault beeps and moves to DIALING; a wrong rhythm is ignored.
-3. **Dial**: turning the knob changes the current digit, with a tick on each step. Pressing the knob confirms the digit, and after 3 digits the guess is submitted.
+2. **Wake**: the player knocks the secret rhythm: three knocks with gaps of about 300 ms then 900 ms, each within ±30%. On a match the vault beeps and moves to DIALING. A wrong rhythm is rejected, and the MCU reports which gap was too short or too long (`KNOCK_RESULT`) for the dashboard's rhythm card.
+3. **Dial**: turning the knob changes the current digit (wrapping 0–9), with a tick on each step. Pressing the knob confirms the digit, and after 3 digits the guess is submitted.
 4. **Check (local)**: the MCXC444 compares the guess with the stored code, so the lock decision never depends on the internet.
-   - **Wrong**: the LED shows a closeness score (e.g. total digit distance mapped from blue = cold to orange = hot). An ATTEMPT packet goes to the ESP32, and the vault returns to LOCKED, so the player must knock again.
-   - **Right**: the vault moves to UNLOCKED, the relay switches the laser off, and the victory tune plays. A SOLVED packet goes to the ESP32.
-5. **Cloud**: the ESP32 sends the attempt history to the LLM, which returns a short hint or taunt for the web page; on a solve, the ESP32 writes the time and attempt count to the leaderboard database.
-6. **Cheating**: a beam break (from the photoresistor) or tamper (from the MPU-6050 via the ESP32) while armed moves the vault to ALARM, with a siren and a 30 s lockout. The event is logged, and the LLM is told so it can comment.
+   - **Wrong**: the LED shows a closeness colour (blue = cold, through yellow, to orange = hot) for 5 s. An ATTEMPT packet goes to the ESP32 with per-digit feedback (correct / elsewhere / absent, see [digit feedback](docs/digit-feedback.md)), and the vault returns to LOCKED, so the player must knock again.
+   - **Right**: the vault moves to UNLOCKED, the LED turns green and the victory tune plays. A SOLVED packet goes to the ESP32.
+5. **Cloud**: the ESP32 publishes events to Firebase. For each wrong guess it also asks Gemini for a short reaction built around a truthful clue (higher/lower, odd/even); the model never sees the secret code. On a solve, the time and attempt count go to the leaderboard.
+6. **Cheating**: opening the lid, or a tamper report from the IMU via the ESP32, while armed moves the vault to ALARM. A tamper alarm sounds the siren and locks out for 10 s. A lid alarm flashes red, lights the laser and lasts until the lid is closed. The event is logged, and the LLM can comment on it.
 
 ### 4.3 Knock detection
 
-- The tap ISR records the tick count of each tap.
-- The game task compares the intervals between taps with the stored pattern, within a tolerance (e.g. ±30%), so the rhythm matters rather than the absolute speed.
-- A gap longer than about 2 s resets the knock buffer.
+- The tap ISR callback records the capture time of each tap.
+- The game task compares the intervals between taps with the stored pattern, within the tolerance, so the rhythm matters rather than the absolute speed.
+- A gap longer than 2 s resets the knock buffer.
 
 ---
 
@@ -134,39 +137,43 @@ All core parts come from the provided kit and boards.
 ```
                           UART (TX/RX, common GND)
    ┌────────────────┐  ◄────────────────────────►  ┌────────────────┐
-   │   FRDM-MCXC444 │                              │     ESP32      │
+   │   FRDM-MCXC444 │                              │     ESP32-S2   │
    │                │                              │                │
-   │ GPIO-IRQ ◄ Tap │                              │ I2C ◄ MPU-6050 │
+   │ GPIO-IRQ ◄ Tap │                              │ I2C ◄ IMU      │
    │ GPIO-IRQ ◄ Enc │                              │                │
    │ ADC      ◄ LDR │                              │ Wi-Fi ─► Cloud │
-   │ GPIO     ► Rly │──► Laser                     │  • LLM API     │
-   │ PWM      ► Bzr │                              │  • Database    │
-   │ PWM×3    ► RGB │                              │  • Web page    │
+   │ GPIO     ► Lsr │                              │  • Gemini API  │
+   │ PWM      ► Bzr │                              │  • Firebase    │
+   │ PWM×3    ► RGB │                              │                │
    └────────────────┘                              └────────────────┘
 ```
 
-### 5.2 Pin table (fill in during build)
+The web dashboard (`web/`) is hosted on Firebase and talks to the ESP32 only through the database.
+
+### 5.2 Pin table
 
 | Signal | Board | Pin | Peripheral | Notes |
 |---|---|---|---|---|
-| Tap OUT | MCXC444 | TBD | PORT IRQ (falling/rising edge) | |
-| Encoder CLK | MCXC444 | TBD | PORT IRQ (either edge) | |
-| Encoder DT | MCXC444 | TBD | GPIO input | Read inside the CLK ISR to get direction |
-| Encoder SW | MCXC444 | TBD | PORT IRQ (falling edge) | Pull-up needed |
-| Photoresistor | MCXC444 | TBD | ADC channel | |
-| Relay IN | MCXC444 | TBD | GPIO output | Check the voltage (§2.4) |
-| Buzzer | MCXC444 | TBD | TPM channel (PWM) | Frequency sets the pitch |
-| RGB R/G/B | MCXC444 | TBD ×3 | TPM channels (PWM) | |
-| UART TX/RX | MCXC444 | TBD | UART | Cross-connect to the ESP32, common ground |
-| MPU-6050 SDA/SCL | ESP32 | Default I2C pins | I2C | |
-| UART TX/RX | ESP32 | TBD | Serial2 | |
+| Tap | MCXC444 | PTC0 (J1-5) | PORT IRQ | |
+| Encoder CLK | MCXC444 | PTC4 (J1-7) | PORT IRQ | |
+| Encoder DT | MCXC444 | PTC6 (J1-9) | PORT IRQ | Decoded with CLK |
+| Encoder SW | MCXC444 | PTC7 (J1-11) | PORT IRQ | Debounced in software |
+| Photoresistor | MCXC444 | PTB0 (J4-2) | ADC0_SE8 | 12-bit |
+| Buzzer | MCXC444 | PTA12 (J1-8) | TPM1_CH0 | Frequency sets the pitch |
+| RGB R / G / B | MCXC444 | PTC2 / PTC1 / PTD2 | TPM0 channels | Active-low (common-positive LED) |
+| Laser logic control | MCXC444 | PTD7 (J2-10) | GPIO output | Optional logic input only |
+| UART TX / RX | MCXC444 | PTE0 (J2-18) / PTE1 (J2-20) | LPUART1 | Crossed to the ESP32, common ground |
+| IMU SDA / SCL | ESP32 | GPIO8 / GPIO9 | I2C | |
+| UART TX / RX | ESP32 | GPIO4 / GPIO5 | UART | GPIO4 to MCU RX, GPIO5 from MCU TX |
+
+The full table with pin configuration is in [the BSP reference](bsp/README.md). ESP32 wiring is in [the ESP32 README](esp32/README.md).
 
 ### 5.3 Engineering justification for placement and read methods
 
 - **Encoder → interrupt on the MCXC444**: quadrature edges are short and frequent, so polling risks missing steps, while an edge interrupt captures every one.
 - **Tap → interrupt**: a tap is a brief pulse at an unpredictable time, and its timestamp needs to be accurate for rhythm matching.
-- **Photoresistor → polled ADC**: light level changes relatively slowly, so sampling every ~50 ms is fast enough to catch a lid opening and wastes little CPU.
-- **MPU-6050 → ESP32 over I2C**: it needs a library and register-level setup that the ESP32's Arduino ecosystem handles well. Tamper is less time-critical than the tripwire, so the UART hop is acceptable.
+- **Photoresistor → polled ADC**: light level changes relatively slowly, so sampling every 50 ms is fast enough to catch a lid opening and wastes little CPU.
+- **IMU → ESP32 over I2C**: sampled at 20 Hz. The ESP32 drives the chip's registers directly, because the GY-521 carries an MPU-6500 that the usual library rejects. Tamper is less time-critical than the lid sensor, so the UART hop is acceptable.
 - **All actuators on the MCXC444**: the lock decision and alarm are local and real-time, and still work if Wi-Fi drops.
 
 ---
@@ -175,49 +182,52 @@ All core parts come from the provided kit and boards.
 
 ### 6.1 Design principles
 
-- ISRs only capture the event (with a timestamp or direction), push it to a queue with `xQueueSendFromISR`, request a context switch if needed, and return. They do no waiting, no UART transmission and no game logic.
+- ISRs only capture the event (with a timestamp), push it to a queue with `xQueueSendFromISR`, request a context switch if needed, and return. They do no waiting, no UART transmission and no game logic.
 - The game task is the single owner of state transitions; other tasks only read the state or post events.
 - Every task blocks (on a queue or with `vTaskDelay`) rather than busy-waiting.
+- A single task owns each output: only `tActuator` writes the LED, buzzer and laser during gameplay.
 
 ### 6.2 Tasks
 
 | Task | Priority | Blocks on | Responsibility |
 |---|---|---|---|
-| `tTripwire` | Highest | `vTaskDelay` (~50 ms period) | Reads the ADC; if armed and the light falls below the threshold for N consecutive samples, posts `EV_BEAM_BROKEN` |
-| `tGame` | High | `xInputQueue` | Runs the FSM: knock matching, digit entry, code check, alarm and lockout timing |
-| `tComms` | Medium | `xUartRxQueue` | Assembles incoming bytes into packets, verifies the checksum, sends ACK/NAK, turns packets into events for `tGame`, and sends outgoing packets |
-| `tActuator` | Low / Medium | `vTaskDelay` (~20 ms) | Reads the current state (under the mutex) and drives the LED colour, buzzer patterns and relay |
+| `tTripwire` | 4 (highest) | `vTaskDelay` (50 ms period) | Reads the ADC; after three consecutive low readings posts the lid-open event, and posts lid-closed on recovery |
+| `tGame` | 3 | `xInputQueue` | Runs the FSM: knock matching, digit entry, code check, alarm and lockout timing |
+| `tInput` | 3 | Raw edge queue | Decodes tap, encoder and button edges, debounces them, and posts `EV_KNOCK`, `EV_DIAL` and `EV_PRESS` |
+| `tComms` | 2 | `xUartRxQueue` | Assembles incoming bytes into packets, verifies the checksum, sends ACK/NAK, turns packets into events for `tGame`, and sends outgoing packets and STATUS |
+| `tActuator` | 1 (lowest) | `vTaskDelay` (20 ms) | Drives the LED colour, buzzer patterns and laser from the latest published state and cue queue |
 
-**Why this order**: a tamper-safety response (tripwire) must pre-empt everything; player input should feel responsive; comms can tolerate a few ms of delay; the visual and audio patterns are the least time-critical.
+**Why this order**: a tamper-safety response must pre-empt everything; player input should feel responsive; comms can tolerate a few ms of delay; the visual and audio patterns are the least time-critical.
 
 ### 6.3 ISRs
 
 | ISR | Trigger | Action |
 |---|---|---|
-| Tap ISR | Tap module edge | Push `EV_KNOCK{tick}` to `xInputQueue` |
-| Encoder ISR (PORT) | CLK edge / SW press | Read DT; push `EV_DIAL{+1/-1}` or `EV_PRESS` |
+| GPIO edge callback (PORTC) | Tap, encoder CLK/DT or SW edge | Capture the raw levels and timestamp into a private raw queue for `tInput` |
 | UART RX ISR | Byte received | Push the byte to `xUartRxQueue` |
 
 ### 6.4 Synchronisation and resource protection
 
 | Primitive | Name | Used for |
 |---|---|---|
-| Queue | `xInputQueue` | ISRs, tripwire task and comms task → game task (all events, one consumer) |
-| Queue | `xUartRxQueue` | UART RX ISR → comms task (raw bytes) |
-| Queue | `xUartTxQueue` | Game task → comms task (packets to send) |
-| Mutex | `xStateMutex` | Protects the shared `gameState` struct (state, current guess, attempt count, hint colour) read by the actuator and comms tasks and written by the game task |
+| Queue | `xInputQueue` | `tInput`, `tTripwire` and `tComms` → `tGame` (all events, one consumer) |
+| Queue | `xUartRxQueue` | UART RX ISR → `tComms` (raw bytes) |
+| Queue | `xUartTxQueue` | `tGame` → `tComms` (packets to send) |
+| Queue | Raw edge queue | GPIO callback → `tInput` (private to the sensor service) |
+| Queue + mailbox | Actuator cue queue and state mailbox | `tGame` → `tActuator` (latest state and accepted feedback; writes never block) |
+| Mutex | `xStateMutex` | Protects the shared `gGame` struct, read by the actuator and comms tasks and written only by `tGame` |
 
 ### 6.5 RTOS configuration
 
 - `configUSE_PREEMPTION = 1`
 - `configUSE_TIME_SLICING = 1`
-- Disable features you don't use (e.g. unused timers, trace or co-routines) to meet the "remove unnecessary components" requirement, and note each one in the report.
+- Heap 4 only. Features that aren't used are disabled to meet the "remove unnecessary components" requirement; note each one in the report.
 
 ---
 
 ## 7. MCXC444 ↔ ESP32 Communication Protocol
 
-UART at a fixed baud rate (e.g. 115200), with packets so that the boundaries between messages are unambiguous and corruption is detected.
+UART at 115200 baud, with packets so that the boundaries between messages are unambiguous and corruption is detected. The single source of truth is `common/vault_protocol/vault_protocol.h`, which both builds compile.
 
 ### 7.1 Frame format
 
@@ -226,21 +236,22 @@ UART at a fixed baud rate (e.g. 115200), with packets so that the boundaries bet
 ```
 
 - **CHECKSUM** = XOR of TYPE, LEN and every payload byte.
-- The receiver uses a small state machine (wait for START → TYPE → LEN → payload → checksum).
-- On a good frame the receiver replies ACK; on a bad checksum or a timeout it replies NAK, and the sender retransmits up to 3 times.
+- The receiver uses a small state machine (wait for START → TYPE → LEN → payload → checksum), and drops a frame that stalls for 50 ms.
+- On a good frame the receiver replies ACK; on a bad checksum, length or unknown type it replies NAK. The sender keeps one message in flight and retransmits on NAK or after 100 ms without an ACK, up to 3 times.
 
 ### 7.2 Message types
 
-| Type | Direction | Payload | Meaning |
-|---|---|---|---|
-| `ARM` | ESP32 → MCU | 3 code digits + knock-pattern ID | Arm the vault with a new code |
-| `DISARM` | ESP32 → MCU | — | Return to IDLE |
-| `TAMPER` | ESP32 → MCU | Acceleration magnitude | The box was shaken; trigger the alarm |
-| `ATTEMPT` | MCU → ESP32 | Guess digits, attempt #, closeness score | A wrong guess, for the AI and the log |
-| `SOLVED` | MCU → ESP32 | Attempt count, time taken (s) | For the leaderboard |
-| `ALARM` | MCU → ESP32 | Cause (beam / tamper) | For logging and an AI taunt |
-| `STATUS` | MCU → ESP32 | Current state | Periodic heartbeat for the web page |
-| `ACK` / `NAK` | Both | Echoed TYPE | Flow control |
+| Type | ID | Direction | Payload | Meaning |
+|---|---|---|---|---|
+| `ARM` | 0x01 | ESP32 → MCU | 3 code digits + knock-pattern ID | Arm the vault with a new code |
+| `DISARM` | 0x02 | ESP32 → MCU | none | Return to IDLE |
+| `TAMPER` | 0x03 | ESP32 → MCU | Peak acceleration in mg | The box was shaken; trigger the alarm |
+| `ATTEMPT` | 0x10 | MCU → ESP32 | Guess digits, attempt #, closeness, 3 feedback bytes | A wrong guess, for the AI and the log |
+| `SOLVED` | 0x11 | MCU → ESP32 | Attempt count, time taken (s) | For the leaderboard |
+| `ALARM` | 0x12 | MCU → ESP32 | Cause (0 beam/lid, 1 tamper) | For logging and an AI taunt |
+| `STATUS` | 0x13 | MCU → ESP32 | State, progress and a sensor snapshot (12 B) | Sent every second, and within ~100 ms of a change; the ESP32 treats 3 s of silence as the MCU being offline |
+| `KNOCK_RESULT` | 0x14 | MCU → ESP32 | Reason and gap classifications | Failed rhythm feedback; no target timings |
+| `ACK` / `NAK` | 0x20 / 0x21 | Both | Echoed TYPE | Flow control |
 
 This covers the rubric's "beyond lab 3 UART" items: packetisation, checksums and ACK/NAK flow control.
 
@@ -251,34 +262,34 @@ This covers the rubric's "beyond lab 3 UART" items: packetisation, checksums and
 ### 8.1 ESP32 responsibilities
 
 1. Connect to Wi-Fi (phone hotspot).
-2. Poll the MPU-6050 (~20 Hz) and compute the acceleration magnitude; if it exceeds a threshold while armed, send `TAMPER`.
+2. Poll the IMU at 20 Hz; if acceleration or rotation exceeds its threshold for several consecutive samples while armed, send `TAMPER`.
 3. Run the UART packet parser and builder (mirroring the MCU side).
-4. On `ATTEMPT` / `ALARM`, call the LLM API and push the reply to the web page.
-5. On `SOLVED`, write the leaderboard entry to the online database.
-6. Serve or connect to the web dashboard: an arm/disarm form, the live status, the AI messages and the leaderboard.
+4. Publish game events, status and the leaderboard to Firebase Realtime Database.
+5. On a wrong guess or alarm, call the Gemini API and publish the reply for the dashboard.
+6. Take arm/disarm commands from the dashboard and forward them to the MCU.
 
-### 8.2 Libraries (beyond the template)
+Wi-Fi, Firebase and Gemini HTTPS share the lowest-priority `tCloud` task, so a slow network never delays the UART link or tamper detection.
 
-- `Wire.h` + an MPU-6050 library (e.g. Adafruit MPU6050) for I2C.
-- `HTTPClient.h` + `Arduino_JSON.h` for REST calls (in the template, extended).
-- `WebServer.h` for a dashboard hosted on the ESP32, **or** a Firebase client library if the dashboard is hosted online.
-- `HardwareSerial` (Serial2) for the MCU link.
+### 8.2 Cloud services
 
-### 8.3 Cloud services
-
-| Service | Option | Use |
+| Service | Choice | Use |
 |---|---|---|
-| Generative AI | OpenAI API (or similar) | The game master's hints and taunts |
-| Online database | Firebase Realtime Database / Supabase | Leaderboard and attempt log |
-| Web app | Page hosted on the ESP32, or a static page reading the database | Arm/disarm, live status, AI messages, leaderboard |
+| Generative AI | Gemini (`gemini-2.5-flash-lite`) | The game master's hints and taunts |
+| Online database | Firebase Realtime Database | Live state, attempt log and leaderboard |
+| Web app | React + TypeScript dashboard on Firebase Hosting | Arm/disarm (owner login), live status, AI messages, rhythm feedback, leaderboard |
 
-### 8.4 LLM game master
+See [the web README](web/README.md) for setup, the database layout and the owner/device accounts.
 
-- **System prompt (sketch)**: "You are a sarcastic vault guarding a 3-digit code. Given the true code and the player's past guesses, reply in under 25 words with either a cryptic hint or a taunt. Never reveal more than one digit's direction per reply."
-- **Input sent**: the code, the guess history, the closeness scores and any alarm events.
-- **Output expected**: JSON `{ "message": "...", "mood": "taunt|hint" }`, parsed with `Arduino_JSON`.
-- **Rate limiting**: call at most once per attempt, with a timeout. If the call fails, the game continues and the web page shows a fallback message.
-- **Keep API keys out of the submitted code**; put them in a separate `secrets.h` that is excluded from the zip.
+### 8.3 LLM game master
+
+- **Local first**: every wrong guess gets a local hint immediately, so the game never waits on the network.
+- **Clues**: Gemini picks one truthful clue (higher/lower or odd/even) for a wrong position, and writes a message around it. It never receives the secret code.
+- **Limits**: replies are capped at 25 words, two sentences and 191 characters, and are checked for numeric disclosure. An invalid reply leaves the local hint in place.
+- **Failure handling**: network errors, quota backoff and low memory leave the local hint active. Only the latest pending job is kept.
+- **Rhythm failures** use fixed dashboard feedback and do not call Gemini.
+- **Secrets**: API keys and Wi-Fi credentials live in an external `secrets.h` that is excluded from the repository and the submission zip.
+
+Details are in [the hint guide](docs/game-master-hints.md).
 
 ---
 
@@ -286,16 +297,16 @@ This covers the rubric's "beyond lab 3 UART" items: packetisation, checksums and
 
 | Requirement | How it's met |
 |---|---|
-| 4 sensors, 3 actuators | Tap, encoder, photoresistor, MPU-6050 / relay, buzzer, RGB LED |
+| 4 sensors, 3 actuators | Tap, encoder, photoresistor, IMU / laser, buzzer, RGB LED |
 | ≥1 sensor on the MCXC444 | Three of them |
-| ≥1 polled, ≥1 interrupt-driven | Photoresistor and MPU polled; tap and encoder interrupt-driven |
-| ≥1 ISR, ≥3 tasks | 3 ISRs, 4 tasks |
+| ≥1 polled, ≥1 interrupt-driven | Photoresistor and IMU polled; tap and encoder interrupt-driven |
+| ≥1 ISR, ≥3 tasks | 2 ISRs (GPIO edge, UART RX), 5 tasks |
 | Good ISR design | ISRs only capture and queue; nothing blocks or waits |
-| ≥1 mutex/semaphore + ≥1 queue | `xStateMutex`, 3 queues |
+| ≥1 mutex/semaphore + ≥1 queue | `xStateMutex` and several queues |
 | Pre-emption + time-slicing | Both enabled; unused features disabled |
-| Bi-directional MCU ↔ ESP32 | ARM/TAMPER down to the MCU, ATTEMPT/SOLVED/ALARM up to the ESP32 |
+| Bi-directional MCU ↔ ESP32 | ARM/DISARM/TAMPER down to the MCU; ATTEMPT/SOLVED/ALARM/STATUS/KNOCK_RESULT up to the ESP32 |
 | Comms bonus | Packetisation, checksum, ACK/NAK retransmission |
-| ESP32 used meaningfully | Hosts a sensor (I2C), the protocol, the web app and the cloud logic |
+| ESP32 used meaningfully | Hosts a sensor (I2C), the protocol, and the cloud logic |
 | Online function + bonus | LLM inference, online database, web app |
 | Coherence | Every part serves the vault game |
 
@@ -305,25 +316,18 @@ This covers the rubric's "beyond lab 3 UART" items: packetisation, checksums and
 
 | Risk | Mitigation |
 |---|---|
-| The relay won't trigger from 3.3 V | Power the module from 5 V or the MB102; test in week 1 |
-| Ambient light confuses the tripwire | Shield the photoresistor with a paper tube; calibrate the threshold at startup |
-| Laser misalignment when the box is moved | Hot-glue or tape both ends firmly; add a "beam OK" check before arming |
-| Encoder bounce causes double steps | Software debounce in the ISR (ignore edges within a few ms) |
-| Hotspot or API failure during the demo | The lock logic is local; cache the last leaderboard; show fallback messages |
-| The MPU triggers when someone bumps the table | Tune the threshold; require it to be exceeded for several samples |
+| Ambient light changes the lid threshold | Calibrate against the assembled box (§2.4), use hysteresis and require three consecutive samples |
+| Encoder bounce causes double steps | The sequence decoder only accepts valid transitions, and the button is debounced |
+| Hotspot or API failure during the demo | The lock logic is local; local hints show immediately; the dashboard shows fallback messages |
+| The IMU triggers when someone bumps the table | Tune the thresholds; require them to be exceeded for several samples; keep a cooldown between packets |
+| Wi-Fi/HTTPS exhausts ESP32 memory | A reduced Wi-Fi buffer profile and a memory guard before each HTTPS call |
+| Tap sensor misses knocks through the lid | Adjust the knock strength or mounting; the ±30% tolerance absorbs timing jitter |
 
 ---
 
-## 11. Timeline
+## 11. Testing
 
-| When | Milestone |
-|---|---|
-| Week 9 (now – 18 Oct) | Test every part individually; confirm the relay and laser work; agree the protocol |
-| By 23 Oct (Interim) | UART link working both ways with basic packets; the FreeRTOS task skeleton running; box layout sketched; **interim report + code submitted** |
-| Week 11 | Full FSM on the MCXC444; tripwire and tamper alarm; actuators finished |
-| Week 12 | LLM game master, database, web page; mount everything in the box; end-to-end testing |
-| Week 13 lab | Demo (rehearse a 5–7 min script: arm → knock → wrong guess + AI hint → cheat attempt → solve → leaderboard) |
-| By 13 Nov | **Final report + code submitted** |
+Host tests run the real FSM, sensor logic, actuator service and comms code against fakes: `python3 ci/run_tests.py`. See [the testing guide](docs/testing.md). Colours, sound, sensor thresholds and physical wiring still need checks on the board, listed in the guides linked above.
 
 ---
 

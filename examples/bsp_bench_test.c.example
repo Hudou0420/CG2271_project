@@ -33,11 +33,6 @@
 #define SENSOR_TEST_PRINTS           1 /* Set to 1 to restore TAP/ENC/DBG output. */
 #define RGB_TEST_ENABLED             0 /* RGB test retained but temporarily disabled. */
 #define BUZZER_TEST_ENABLED          0
-#ifndef RELAY_TEST_ENABLED
-#define RELAY_TEST_ENABLED           1
-#endif
-#define RELAY_TEST_ACTIVE_LOW        0 /* Change to 1 if module energizes on LOW. */
-#define RELAY_HOLD_SAMPLES           2000U
 #ifndef LASER_TEST_ENABLED
 #define LASER_TEST_ENABLED           0
 #endif
@@ -147,19 +142,6 @@ static BspStatus buzzer_test_play(uint32_t index)
     return status;
 }
 #endif /* BUZZER_TEST_ENABLED */
-
-#if RELAY_TEST_ENABLED
-static BspStatus relay_test_set(bool on)
-{
-    BspStatus status = bsp_relay_set(on);
-    if (status == BSP_OK) {
-        bool high = on != (RELAY_TEST_ACTIVE_LOW != 0);
-        PRINTF("RELAY requested=%s, signal=%s, active_low=%u\r\n",
-               on ? "ON" : "OFF", high ? "HIGH" : "LOW", RELAY_TEST_ACTIVE_LOW);
-    }
-    return status;
-}
-#endif
 
 /* Raw edges are counted so a short tap is visible between console prints.
  * No debounce or knock interpretation. Never print inside the ISR.
@@ -274,15 +256,14 @@ int main(void) {
 
     PRINTF("Component test boot: debug console ready.\r\n");
 
-#if RELAY_TEST_ENABLED || LASER_TEST_ENABLED || BUZZER_TEST_ENABLED || (RGB_TEST_ENABLED && !RGB_TEST_USE_GPIO)
+#if LASER_TEST_ENABLED || BUZZER_TEST_ENABLED || (RGB_TEST_ENABLED && !RGB_TEST_USE_GPIO)
     /* Configurable polarity for either common-anode or common-cathode RGB.
-     * Output init establishes RGB off, buzzer silent, relay inactive, and
-     * laser logic output inactive. The laser test opts in to its GPIO.
+     * Output init establishes RGB off, buzzer silent, and laser
+     * logic output inactive. The laser test opts in to its GPIO.
      */
     BspOutputConfig output_config;
     bsp_outputs_default_config(&output_config);
     output_config.rgb_active_low = RGB_TEST_ACTIVE_LOW != 0;
-    output_config.relay_active_low = RELAY_TEST_ACTIVE_LOW != 0;
     output_config.enable_laser_signal = LASER_TEST_ENABLED != 0;
     output_config.laser_active_low = LASER_TEST_ACTIVE_LOW != 0;
     BspStatus output_status = bsp_outputs_init(&output_config);
@@ -348,10 +329,6 @@ int main(void) {
     bool laser_on = true; /* Requested logic state, not optical feedback. */
     uint32_t laser_samples = 0U;
 #endif
-#if RELAY_TEST_ENABLED
-    bool relay_on = false; /* Start with logical OFF, then toggle. */
-    uint32_t relay_samples = 0U;
-#endif
 #if LDR_TEST_ENABLED
     uint32_t ldr_samples = 0U;
     uint32_t ldr_pending_polls = 0U;
@@ -411,14 +388,6 @@ int main(void) {
 #if LDR_TEST_ENABLED
     PRINTF("LDR analog=PTB0/J4-2; sampled every ~50 ms.\r\n");
     PRINTF("Block/unblock light at the LDR to compare raw readings.\r\n");
-#endif
-#if RELAY_TEST_ENABLED
-    PRINTF("Relay test: signal=PTD6/J2-8; toggles every ~2 s; test contacts without a load.\r\n");
-    status = relay_test_set(relay_on);
-    if (status != BSP_OK) {
-        PRINTF("Relay start failed: status=%u\r\n", (unsigned int)status);
-        return 1;
-    }
 #endif
 
     /* Standalone bench test; no FreeRTOS scheduler is started here. */
@@ -512,18 +481,6 @@ int main(void) {
             if (status != BSP_OK) {
                 (void)bsp_buzzer_set_frequency(0U);
                 PRINTF("Buzzer write failed: status=%u\r\n", (unsigned int)status);
-                return 1;
-            }
-        }
-#endif
-#if RELAY_TEST_ENABLED
-        if (++relay_samples >= RELAY_HOLD_SAMPLES) {
-            relay_samples = 0U;
-            relay_on = !relay_on;
-            status = relay_test_set(relay_on);
-            if (status != BSP_OK) {
-                (void)bsp_relay_set(false);
-                PRINTF("Relay write failed: status=%u\r\n", (unsigned int)status);
                 return 1;
             }
         }
