@@ -29,17 +29,15 @@ int32_t vault_encoder_update(VaultEncoder *encoder, bool clk, bool dt);
 
 typedef struct {
     uint16_t threshold;
-    uint16_t high_threshold;
-    uint16_t close_above;
-    uint16_t confirm_samples;
+    uint16_t hysteresis;
+    uint16_t blocked_samples;
     uint16_t count;
+    bool blocked_when_low;
     bool latched;
 } VaultBeamFilter;
 
 void vault_beam_reset(VaultBeamFilter *filter);
-/* Raw < threshold or in (high_threshold, close_above] opens; otherwise closes.
- * Require confirm_samples consecutive opposite classifications to change state.
- * Returns true only on confirmed opening. Disarming resets latch and count. */
+/* One true result per confirmed break; clear light beyond hysteresis releases latch. */
 bool vault_beam_update(VaultBeamFilter *filter, uint16_t raw, bool armed);
 
 #endif
