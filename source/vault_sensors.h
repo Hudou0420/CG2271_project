@@ -13,8 +13,8 @@ typedef struct {
     uint32_t game_events_sent;
     uint32_t beam_queue_retries;
     uint32_t adc_errors;
-    uint16_t ldr_raw;
-    bool ldr_valid;
+    uint16_t ldr_raw; /* Last successful raw ADC reading. */
+    bool ldr_valid; /* Latest ADC conversion succeeded. */
     bool inputs_ready;
     bool beam_detection_enabled;
 } VaultSensorStats;
